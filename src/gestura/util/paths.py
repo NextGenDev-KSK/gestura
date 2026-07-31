@@ -50,12 +50,14 @@ def log_dir() -> Path:
 
 
 def project_root() -> Path:
-    """Repository root (useful in dev for locating bundled assets/models)."""
+    """Repository root (dev) or the PyInstaller bundle root (frozen) for locating assets."""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     return Path(__file__).resolve().parents[3]
 
 
 def models_dir() -> Path:
-    """Where ML model files live. Prefers a user copy, falls back to the bundled repo dir."""
+    """Where ML model files live. Prefers a user copy, falls back to the bundled/repo dir."""
     user_models = data_dir() / "models"
     if user_models.exists():
         return user_models
