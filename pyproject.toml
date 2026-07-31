@@ -64,6 +64,11 @@ Issues = "https://github.com/your-org/gestura/issues"
 # --- Tooling ------------------------------------------------------------------
 [tool.hatch.build.targets.wheel]
 packages = ["src/gestura"]
+# Ship the QML UI files (and any future non-Python assets) inside the package.
+artifacts = ["src/gestura/app/qml/**/*", "src/gestura/**/*.qml", "src/gestura/**/qmldir"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/gestura/app/qml" = "gestura/app/qml"
 
 [tool.pytest.ini_options]
 minversion = "8.0"

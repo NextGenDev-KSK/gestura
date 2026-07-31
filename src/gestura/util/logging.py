@@ -31,6 +31,10 @@ def configure(level: int | str = logging.INFO, *, to_file: bool = True) -> None:
     console.setFormatter(logging.Formatter("%(name)s — %(message)s", datefmt="%H:%M:%S"))
     root.addHandler(console)
 
+    # Quiet chatty third-party libraries pulled in transitively (matplotlib via mediapipe, etc.).
+    for noisy in ("matplotlib", "PIL", "comtypes", "fontTools", "h5py"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
     if to_file:
         logfile = log_dir() / "gestura.log"
         file_handler = RotatingFileHandler(

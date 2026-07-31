@@ -48,7 +48,12 @@ class PipelineTelemetry:
     camera_status: str
 
 
-UpdateCallback = Callable[[FrameResult, InterpretationResult, PipelineTelemetry], None]
+import numpy as np
+
+# on_update(source_bgr_image, tracking_result, interpretation, telemetry)
+UpdateCallback = Callable[
+    ["np.ndarray", FrameResult, InterpretationResult, PipelineTelemetry], None
+]
 
 
 class GesturePipeline:
@@ -203,7 +208,7 @@ class GesturePipeline:
             self._last_telemetry = telemetry
             if self._on_update is not None:
                 try:
-                    self._on_update(result, interpretation, telemetry)
+                    self._on_update(frame.image, result, interpretation, telemetry)
                 except Exception:  # noqa: BLE001 - a bad UI callback must not kill the engine
                     _log.exception("on_update callback raised")
 
@@ -234,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     mode_word = "LIVE (controlling your computer)" if args.live else "DRY-RUN (no input injected)"
     print(f"Gestura demo — {mode_word}. Show your hand to the camera. Ctrl+C to stop.\n")
 
-    def on_update(_frame, interp, tele) -> None:
+    def on_update(_img, _frame, interp, tele) -> None:
         for ev in interp.events:
             print(f"  [{tele.fps:4.0f} fps] gesture: {ev.name:<18} {ev.phase.value}")
 
