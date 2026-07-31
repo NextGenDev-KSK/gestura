@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Packaging
+*.spec.bak
+packaging/build/
+packaging/dist/
+*.msi
+*.exe
+
+# Models (downloaded at setup; tracked via scripts/fetch_models.py)
+models/*.task
+models/*.tflite
+models/*.onnx
+
+# App runtime data / logs
+*.log
+logs/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
