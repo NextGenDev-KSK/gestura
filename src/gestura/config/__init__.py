@@ -19,6 +19,7 @@ from .models import (
 from .store import CONFIG_FILENAME, SettingsStore
 
 __all__ = [
+    "CONFIG_FILENAME",
     "DEFAULT_BINDINGS",
     "SCHEMA_VERSION",
     "AppSettings",
@@ -28,9 +29,8 @@ __all__ = [
     "GestureBinding",
     "GestureThresholds",
     "Profile",
+    "SettingsStore",
     "Theme",
     "TrackingConfig",
     "UiConfig",
-    "CONFIG_FILENAME",
-    "SettingsStore",
 ]

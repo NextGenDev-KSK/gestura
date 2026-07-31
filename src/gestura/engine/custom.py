@@ -27,7 +27,7 @@ from ..util.logging import get_logger
 
 _log = get_logger("gestura.engine.custom")
 
-FEATURE_DIM = 42  # 21 landmarks × (x, y)
+FEATURE_DIM = 42  # 21 landmarks * (x, y)
 
 
 def landmark_feature(hand: HandObservation) -> np.ndarray:

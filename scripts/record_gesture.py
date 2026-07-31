@@ -48,8 +48,9 @@ def main() -> int:
                 break
         time.sleep(0.02)
     else:
-        print("No hand detected — aborting.")
-        cam.stop(); tracker.close()
+        print("No hand detected - aborting.")
+        cam.stop()
+        tracker.close()
         return 1
 
     for n in (3, 2, 1):

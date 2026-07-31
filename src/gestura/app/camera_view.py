@@ -44,7 +44,7 @@ class CameraView(QQuickPaintedItem):
         self._points = points
         self.update()
 
-    def paint(self, painter: QPainter) -> None:  # noqa: N802 (Qt override)
+    def paint(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
 

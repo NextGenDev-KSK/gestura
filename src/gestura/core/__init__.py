@@ -29,7 +29,7 @@ from .types import (
     HandObservation,
 )
 
-__all__ = [
+__all__ = [  # noqa: RUF022 - grouped by concern for readability, not alphabetised
     # types
     "FINGERTIPS",
     "NUM_LANDMARKS",

@@ -12,14 +12,14 @@ from .recognizers import Pose, classify_static_pose
 __all__ = [
     "CursorController",
     "CustomGestureClassifier",
-    "landmark_feature",
     "FeatureSet",
-    "extract",
     "GestureInterpreter",
+    "GesturePipeline",
     "InterpretationResult",
     "Mode",
-    "GesturePipeline",
     "PipelineTelemetry",
     "Pose",
     "classify_static_pose",
+    "extract",
+    "landmark_feature",
 ]

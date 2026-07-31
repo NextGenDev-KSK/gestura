@@ -156,7 +156,8 @@ class CameraSource:
             if not ok or image is None:
                 failures += 1
                 if failures >= self._MAX_READ_FAILURES:
-                    _log.warning("Camera %s read failed %d× — reconnecting", self.device_index, failures)
+                    _log.warning("Camera %s read failed %dx; reconnecting",
+                                 self.device_index, failures)
                     self._release()
                     failures = 0
                     backoff_i = 1
@@ -213,7 +214,7 @@ class CameraSource:
         if self._on_status is not None:
             try:
                 self._on_status(status)
-            except Exception:  # noqa: BLE001 - a bad UI callback must not kill capture
+            except Exception:
                 _log.exception("Camera status callback raised")
 
 

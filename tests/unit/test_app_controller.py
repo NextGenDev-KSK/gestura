@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from gestura.app.controller import AppController  # noqa: E402
+from gestura.app.controller import AppController
 
 
 def test_to_qimage_preserves_size_and_converts_bgr_to_rgb() -> None:

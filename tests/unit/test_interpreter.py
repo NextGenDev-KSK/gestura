@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
-
 from gestura.config.models import Profile
 from gestura.core.types import GesturePhase, HandObservation
 from gestura.engine.interpreter import GestureInterpreter, Mode

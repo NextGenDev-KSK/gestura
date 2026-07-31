@@ -22,6 +22,8 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import numpy as np
+
 from ..actions.dispatcher import ActionDispatcher
 from ..config.models import AppSettings
 from ..core.timing import RateEstimator
@@ -50,11 +52,9 @@ class PipelineTelemetry:
     camera_status: str
 
 
-import numpy as np
-
 # on_update(source_bgr_image, tracking_result, interpretation, telemetry)
 UpdateCallback = Callable[
-    ["np.ndarray", FrameResult, InterpretationResult, PipelineTelemetry], None
+    [np.ndarray, FrameResult, InterpretationResult, PipelineTelemetry], None
 ]
 
 
@@ -95,7 +95,8 @@ class GesturePipeline:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._fps = RateEstimator(window=1.0)
-        self._last_telemetry = PipelineTelemetry(0, 0, False, "none", "IDLE", settings.paused, "idle")
+        self._last_telemetry = PipelineTelemetry(
+            0, 0, False, "none", "IDLE", settings.paused, "idle")
         self._camera_status = CameraStatus.IDLE
         self._init_error: str | None = None
 
@@ -167,7 +168,7 @@ class GesturePipeline:
             self._init_error = str(exc)
             _log.error("%s", exc)
             return
-        except Exception as exc:  # noqa: BLE001 - surface any init failure to the UI
+        except Exception as exc:
             self._init_error = f"Tracker init failed: {exc}"
             _log.exception("Tracker initialisation failed")
             return
@@ -187,7 +188,7 @@ class GesturePipeline:
                     timestamp_ms=int(frame.timestamp * 1000),
                     frame_index=frame.index,
                 )
-            except Exception:  # noqa: BLE001 - a bad frame must not kill the loop (watchdog)
+            except Exception:
                 _log.exception("Tracker.process failed; skipping frame")
                 continue
             inference_ms = (time.perf_counter() - t0) * 1000.0
@@ -195,7 +196,7 @@ class GesturePipeline:
             interpretation = self._interpreter.update(result)
             try:
                 self._dispatcher.dispatch(interpretation)
-            except Exception:  # noqa: BLE001 - defensive; dispatcher already guards per-action
+            except Exception:
                 _log.exception("Dispatch failed")
 
             fps = self._fps.tick()
@@ -212,7 +213,7 @@ class GesturePipeline:
             if self._on_update is not None:
                 try:
                     self._on_update(frame.image, result, interpretation, telemetry)
-                except Exception:  # noqa: BLE001 - a bad UI callback must not kill the engine
+                except Exception:
                     _log.exception("on_update callback raised")
 
     def _on_camera_status(self, status: CameraStatus) -> None:

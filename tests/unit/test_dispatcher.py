@@ -95,7 +95,8 @@ def test_unknown_action_is_ignored_gracefully() -> None:
 
 def test_disabled_binding_is_skipped() -> None:
     adapter = RecordingAdapter()
-    profile = Profile(bindings=[GestureBinding(gesture="pinch", action="left_click", enabled=False)])
+    profile = Profile(
+        bindings=[GestureBinding(gesture="pinch", action="left_click", enabled=False)])
     disp = ActionDispatcher(adapter, profile)
     disp.dispatch(_result(_ev("pinch", GesturePhase.BEGAN)))
     assert adapter.names() == []

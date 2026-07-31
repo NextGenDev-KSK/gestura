@@ -17,7 +17,7 @@ class Cooldown:
     Prevents machine-gun repeats (e.g. a single pinch producing dozens of clicks).
     """
 
-    __slots__ = ("interval", "_last_fired")
+    __slots__ = ("_last_fired", "interval")
 
     def __init__(self, interval: float) -> None:
         if interval < 0:
@@ -53,7 +53,7 @@ class SchmittTrigger:
     between keeps its current state.
     """
 
-    __slots__ = ("low", "high", "_state")
+    __slots__ = ("_state", "high", "low")
 
     def __init__(self, low: float, high: float, *, initial: bool = False) -> None:
         if not low < high:
@@ -85,7 +85,7 @@ class StabilityGate:
     held for 120 ms) before it is accepted. Releasing is immediate so control feels responsive.
     """
 
-    __slots__ = ("duration", "_true_since", "_active")
+    __slots__ = ("_active", "_true_since", "duration")
 
     def __init__(self, duration: float) -> None:
         if duration < 0:
@@ -122,7 +122,7 @@ class RateEstimator:
     Tracks timestamps of recent events within ``window`` seconds and reports events-per-second.
     """
 
-    __slots__ = ("window", "_events")
+    __slots__ = ("_events", "window")
 
     def __init__(self, window: float = 1.0) -> None:
         if window <= 0:

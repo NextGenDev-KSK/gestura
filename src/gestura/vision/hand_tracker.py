@@ -46,7 +46,9 @@ class HandTracker:
         mirrored: bool = True,
     ) -> None:
         self.mirrored = mirrored
-        self._model_path = Path(model_path) if model_path else (models_dir() / DEFAULT_MODEL_FILENAME)
+        self._model_path = (
+            Path(model_path) if model_path else models_dir() / DEFAULT_MODEL_FILENAME
+        )
         if not self._model_path.exists():
             raise ModelNotFoundError(
                 f"Hand-landmark model not found at {self._model_path}. "
@@ -77,7 +79,7 @@ class HandTracker:
         )
         try:
             self._landmarker = mp_vision.HandLandmarker.create_from_options(options)
-        except Exception:  # noqa: BLE001 - GPU delegate can fail; fall back to CPU
+        except Exception:
             if use_gpu:
                 _log.warning("GPU delegate failed to initialise; falling back to CPU")
                 base = mp_python.BaseOptions(

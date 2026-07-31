@@ -10,11 +10,11 @@ from .camera import CameraFrame, CameraSource, CameraStatus, list_cameras
 from .hand_tracker import DEFAULT_MODEL_FILENAME, HandTracker, ModelNotFoundError
 
 __all__ = [
+    "DEFAULT_MODEL_FILENAME",
     "CameraFrame",
     "CameraSource",
     "CameraStatus",
-    "list_cameras",
-    "DEFAULT_MODEL_FILENAME",
     "HandTracker",
     "ModelNotFoundError",
+    "list_cameras",
 ]

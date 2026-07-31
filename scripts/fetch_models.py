@@ -41,7 +41,7 @@ MODELS: tuple[ModelSpec, ...] = (
 def _download(spec: ModelSpec, dest: Path) -> None:
     print(f"[fetch] {spec.description}\n  {spec.url}")
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(spec.url) as resp:  # noqa: S310 - trusted Google host
+    with urllib.request.urlopen(spec.url) as resp:
         total = int(resp.headers.get("Content-Length", 0))
         read = 0
         digest = hashlib.sha256()
@@ -67,7 +67,7 @@ def main() -> int:
             continue
         try:
             _download(spec, dest)
-        except Exception as exc:  # noqa: BLE001 - report and fail clearly
+        except Exception as exc:
             print(f"[error] Failed to download {spec.filename}: {exc}", file=sys.stderr)
             return 1
     print("\nAll models ready in", MODELS_DIR)

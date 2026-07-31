@@ -91,7 +91,7 @@ class OSAdapter(ABC):
     def hotkey(self, *keys: str) -> None:
         """Press a key chord, e.g. ``hotkey('ctrl', 'c')``. Modifiers first, then the main key."""
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027 - intentionally optional (not all adapters hold resources)
         """Release any held resources (COM handles, etc.). Optional override."""
 
 

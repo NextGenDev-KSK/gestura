@@ -23,7 +23,7 @@ def _smoothing_alpha(cutoff: float, dt: float) -> float:
 class _LowPass:
     """First-order low-pass (EMA) filter with settable per-step alpha."""
 
-    __slots__ = ("_value", "_initialized")
+    __slots__ = ("_initialized", "_value")
 
     def __init__(self) -> None:
         self._value: float = 0.0
@@ -59,7 +59,7 @@ class OneEuroFilter:
     given, ``time.perf_counter()`` is used. The first sample is returned unchanged.
     """
 
-    __slots__ = ("min_cutoff", "beta", "d_cutoff", "_x", "_dx", "_last_t")
+    __slots__ = ("_dx", "_last_t", "_x", "beta", "d_cutoff", "min_cutoff")
 
     def __init__(self, min_cutoff: float = 1.0, beta: float = 0.0, d_cutoff: float = 1.0) -> None:
         if min_cutoff <= 0 or d_cutoff <= 0:
@@ -75,11 +75,9 @@ class OneEuroFilter:
 
     def __call__(self, x: float, timestamp: float | None = None) -> float:
         t = time.perf_counter() if timestamp is None else timestamp
-        if self._last_t is None or t <= self._last_t:
-            # First sample, or non-monotonic clock: seed without adapting.
-            dt = 1.0 / 60.0
-        else:
-            dt = t - self._last_t
+        # First sample, or a non-monotonic clock: seed with a nominal 60 Hz step, don't adapt.
+        fresh = self._last_t is None or t <= self._last_t
+        dt = 1.0 / 60.0 if fresh else t - self._last_t
         self._last_t = t
 
         # Estimate and smooth the derivative (units/second).
@@ -121,7 +119,7 @@ class OneEuroFilter2D:
 class ExponentialMovingAverage:
     """Plain fixed-alpha EMA — used for slowly-varying scalars (e.g. confidence, FPS)."""
 
-    __slots__ = ("alpha", "_value", "_initialized")
+    __slots__ = ("_initialized", "_value", "alpha")
 
     def __init__(self, alpha: float = 0.2) -> None:
         if not 0.0 < alpha <= 1.0:
@@ -131,7 +129,10 @@ class ExponentialMovingAverage:
         self._initialized = False
 
     def __call__(self, x: float) -> float:
-        self._value = x if not self._initialized else self.alpha * x + (1 - self.alpha) * self._value
+        if not self._initialized:
+            self._value = x
+        else:
+            self._value = self.alpha * x + (1 - self.alpha) * self._value
         self._initialized = True
         return self._value
 

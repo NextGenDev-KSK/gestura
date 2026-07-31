@@ -13,7 +13,6 @@ no default audio endpoint, logs a warning instead of raising into the gesture lo
 from __future__ import annotations
 
 import ctypes
-import time
 from ctypes import wintypes
 from datetime import datetime, timezone
 
@@ -154,8 +153,8 @@ class WindowsAdapter(OSAdapter):
     # -- pointer -------------------------------------------------------------------------------
     def move_cursor(self, x: float, y: float) -> None:
         # Absolute normalized coordinates span the whole virtual desktop (0..65535).
-        ax = int(round(clamp(x) * 65535))
-        ay = int(round(clamp(y) * 65535))
+        ax = round(clamp(x) * 65535)
+        ay = round(clamp(y) * 65535)
         _send(_mouse_input(
             _MOUSEEVENTF_MOVE | _MOUSEEVENTF_ABSOLUTE | _MOUSEEVENTF_VIRTUALDESK, ax, ay
         ))
@@ -210,16 +209,16 @@ class WindowsAdapter(OSAdapter):
         if self._volume is not None or self._volume_failed:
             return self._volume
         try:
-            import comtypes
             from ctypes import POINTER, cast
 
+            import comtypes
             from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
             comtypes.CoInitialize()
             devices = AudioUtilities.GetSpeakers()
             interface = devices.Activate(IAudioEndpointVolume._iid_, comtypes.CLSCTX_ALL, None)
             self._volume = cast(interface, POINTER(IAudioEndpointVolume))
-        except Exception:  # noqa: BLE001 - never let audio init crash the loop
+        except Exception:
             _log.exception("Volume control unavailable; falling back to media keys")
             self._volume_failed = True
         return self._volume
@@ -251,7 +250,7 @@ class WindowsAdapter(OSAdapter):
             base = current[0] if isinstance(current, list) else current
             target = int(clamp((base + delta_percent) / 100.0) * 100)
             sbc.set_brightness(target)
-        except Exception:  # noqa: BLE001 - many displays lack DDC/CI
+        except Exception:
             _log.warning("Brightness control unavailable on this display")
 
     # -- media ---------------------------------------------------------------------------------

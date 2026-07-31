@@ -65,7 +65,7 @@ class CursorController:
         return self._last_out
 
     def reset(self) -> None:
-        """Clear smoothing state — call on tracking loss so the cursor doesn't leap on re-acquire."""
+        """Clear smoothing state on tracking loss so the cursor doesn't leap on re-acquire."""
         self._filter.reset()
         self._last_raw = None
         self._last_out = None

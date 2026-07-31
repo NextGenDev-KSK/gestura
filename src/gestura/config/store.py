@@ -104,7 +104,8 @@ class SettingsStore:
     # -- helpers -------------------------------------------------------------------------------
     def _quarantine(self, *, reason: str) -> None:
         backup = self.path.with_suffix(self.path.suffix + ".corrupt")
-        _log.error("Settings file rejected (%s); backing up to %s and using defaults", reason, backup)
+        _log.error("Settings file rejected (%s); backing up to %s and using defaults",
+                   reason, backup)
         try:
             shutil.copy2(self.path, backup)
         except OSError:  # pragma: no cover - best-effort backup

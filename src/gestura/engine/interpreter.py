@@ -134,14 +134,12 @@ class GestureInterpreter:
         fist_stable = self._fist_gate.update(pose == Pose.FIST and ok, now)
         if fist_stable and self._mode is not Mode.DRAG:
             self._mode = Mode.DRAG
-            result.events.append(
-                GestureEvent("fist", GesturePhase.BEGAN, conf, position=result.cursor, timestamp=now)
-            )
+            result.events.append(GestureEvent(
+                "fist", GesturePhase.BEGAN, conf, position=result.cursor, timestamp=now))
         elif not fist_stable and self._mode is Mode.DRAG:
             self._mode = Mode.IDLE
-            result.events.append(
-                GestureEvent("fist", GesturePhase.ENDED, conf, position=result.cursor, timestamp=now)
-            )
+            result.events.append(GestureEvent(
+                "fist", GesturePhase.ENDED, conf, position=result.cursor, timestamp=now))
         return self._mode is Mode.DRAG
 
     # -- scroll --------------------------------------------------------------------------------
@@ -181,12 +179,10 @@ class GestureInterpreter:
             self._pinch_closed, f.pinch_index_norm if allowed else 1.0
         )
         if closed and not self._pinch_closed and self._click_cd.try_fire(now):
-            result.events.append(
-                GestureEvent("pinch", GesturePhase.BEGAN, conf, position=result.cursor, timestamp=now)
-            )
-            result.events.append(
-                GestureEvent("pinch", GesturePhase.ENDED, conf, position=result.cursor, timestamp=now)
-            )
+            result.events.append(GestureEvent(
+                "pinch", GesturePhase.BEGAN, conf, position=result.cursor, timestamp=now))
+            result.events.append(GestureEvent(
+                "pinch", GesturePhase.ENDED, conf, position=result.cursor, timestamp=now))
         self._pinch_closed = closed
 
     # -- middle pinch / right click ------------------------------------------------------------
@@ -211,11 +207,8 @@ class GestureInterpreter:
 
     # -- volume (thumb up/down) ----------------------------------------------------------------
     def _handle_volume(self, pose, ok, conf, result, now) -> None:
-        if pose in (Pose.THUMB_UP, Pose.THUMB_DOWN) and ok:
-            if self._volume_cd.try_fire(now):
-                result.events.append(
-                    GestureEvent(pose, GesturePhase.UPDATED, conf, timestamp=now)
-                )
+        if pose in (Pose.THUMB_UP, Pose.THUMB_DOWN) and ok and self._volume_cd.try_fire(now):
+            result.events.append(GestureEvent(pose, GesturePhase.UPDATED, conf, timestamp=now))
 
     # -- pause toggle (open palm hold) ---------------------------------------------------------
     def _handle_pause(self, pose, ok, conf, result, now) -> None:

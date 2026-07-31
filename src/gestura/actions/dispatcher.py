@@ -87,5 +87,5 @@ class ActionDispatcher(EngineControl):
         ctx = ActionContext(self._adapter, event, binding.params, control=self)
         try:
             spec.handler(ctx)
-        except Exception:  # noqa: BLE001 - one bad action must not kill the pipeline
+        except Exception:
             _log.exception("Action '%s' failed", binding.action)
