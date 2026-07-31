@@ -149,11 +149,9 @@ class AppSettings(_Model):
 # these are the discrete/modal actions. Names correspond to recognizers in gestura.engine.
 DEFAULT_BINDINGS: tuple[GestureBinding, ...] = (
     GestureBinding(gesture="pinch", action="left_click"),
-    GestureBinding(gesture="double_pinch", action="double_click"),
     GestureBinding(gesture="middle_pinch", action="right_click"),
     GestureBinding(gesture="fist", action="drag"),  # hold to drag, release to drop
     GestureBinding(gesture="two_finger_scroll", action="scroll"),
-    GestureBinding(gesture="pinch_spread", action="zoom"),
     GestureBinding(gesture="thumb_up", action="volume_up", params={"amount": 2.0}),
     GestureBinding(gesture="thumb_down", action="volume_down", params={"amount": 2.0}),
     GestureBinding(gesture="open_palm_hold", action="pause_toggle"),

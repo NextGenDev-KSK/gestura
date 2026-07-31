@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gestura.core.types import Handedness, HandLandmark, HandObservation
+from gestura.core.types import FrameResult, Handedness, HandLandmark, HandObservation
 
 _UP = np.array([0.0, -1.0])  # "up" in image space is -y
 _PERP = np.array([1.0, 0.0])  # perpendicular used to bend curled fingers
@@ -67,49 +67,83 @@ def _place_chain(base: np.ndarray, direction: np.ndarray, *, curled: bool, seg: 
     return [p0, p1, p2, p3]
 
 
+# Which of the four fingers are curled for each pose (thumb handled separately).
+_CURLED_FINGERS: dict[str, set[str]] = {
+    "open": set(),
+    "fist": {"index", "middle", "ring", "pinky"},
+    "point": {"middle", "ring", "pinky"},
+    "victory": {"ring", "pinky"},
+    "pinch": set(),          # fingers stay open; index/thumb tips overridden to touch
+    "middle_pinch": set(),   # index stays extended; middle/thumb tips overridden to touch
+    "thumb_up": {"index", "middle", "ring", "pinky"},
+    "thumb_down": {"index", "middle", "ring", "pinky"},
+}
+
+
 def make_hand(pose: str = "open", *, handedness: Handedness = Handedness.RIGHT,
               score: float = 0.99) -> HandObservation:
     """Build a synthetic :class:`HandObservation` for a named ``pose``.
 
-    Supported poses: ``"open"`` (all fingers extended), ``"fist"`` (all curled),
-    ``"point"`` (index extended, rest curled), ``"pinch"`` (thumb tip touching index tip).
+    Supported poses: ``open``, ``fist``, ``point``, ``victory``, ``pinch`` (index+thumb touch),
+    ``middle_pinch`` (middle+thumb touch, index extended), ``thumb_up``, ``thumb_down``.
     """
+    if pose not in _CURLED_FINGERS:
+        raise ValueError(f"unknown pose {pose!r}")
+
     lm = np.zeros((21, 3), dtype=np.float32)
     for landmark, xy in _ANCHORS.items():
         lm[int(landmark), :2] = xy
 
-    curled_all = pose == "fist"
+    curled_set = _CURLED_FINGERS[pose]
     for name, (chain, direction) in _FINGERS.items():
-        curled = curled_all or (pose == "point" and name != "index") or (
-            pose == "pinch" and name != "index"
-        )
-        pts = _place_chain(_ANCHORS[chain[0]], direction, curled=curled)
+        pts = _place_chain(_ANCHORS[chain[0]], direction, curled=name in curled_set)
         for idx, p in zip(chain, pts, strict=True):
             lm[int(idx), :2] = p
 
-    # Thumb: build a straight chain from CMC toward the MCP anchor direction.
-    thumb_dir = np.array([-0.55, -0.83])  # up-and-left
+    # Thumb: direction + length depend on the pose.
+    if pose == "thumb_up":
+        thumb_dir, thumb_seg = _UP.copy(), 0.12
+    elif pose == "thumb_down":
+        thumb_dir, thumb_seg = -_UP.copy(), 0.12
+    else:
+        thumb_dir, thumb_seg = np.array([-0.55, -0.83]), 0.07
     thumb_dir = thumb_dir / np.linalg.norm(thumb_dir)
     thumb_pts = _place_chain(_ANCHORS[HandLandmark.THUMB_CMC], thumb_dir,
-                             curled=(pose == "fist"), seg=0.07)
+                             curled=(pose == "fist"), seg=thumb_seg)
     for idx, p in zip(_THUMB_CHAIN, thumb_pts, strict=True):
         lm[int(idx), :2] = p
 
+    # Contact overrides: place the two pinching tips on a common point.
     if pose == "pinch":
-        # Force the thumb tip onto the (curled) index fingertip.
-        index_tip = lm[int(HandLandmark.INDEX_TIP), :2].copy()
-        # Bring the index tip up to a natural pinch height first.
-        index_tip = _ANCHORS[HandLandmark.INDEX_MCP] + _UP * 0.16
-        lm[int(HandLandmark.INDEX_TIP), :2] = index_tip
-        lm[int(HandLandmark.THUMB_TIP), :2] = index_tip + np.array([0.005, 0.0])
+        p = _ANCHORS[HandLandmark.INDEX_MCP] + _UP * 0.13
+        lm[int(HandLandmark.INDEX_TIP), :2] = p
+        lm[int(HandLandmark.THUMB_TIP), :2] = p + np.array([0.004, 0.0])
+    elif pose == "middle_pinch":
+        p = _ANCHORS[HandLandmark.MIDDLE_MCP] + _UP * 0.13
+        lm[int(HandLandmark.MIDDLE_TIP), :2] = p
+        lm[int(HandLandmark.THUMB_TIP), :2] = p + np.array([0.004, 0.0])
 
     return HandObservation(landmarks=lm, handedness=handedness, score=score)
+
+
+def make_frame(hand: HandObservation | None, *, timestamp: float, index: int = 0,
+               width: int = 640, height: int = 480) -> FrameResult:
+    """Wrap a hand (or ``None`` for tracking loss) in a :class:`FrameResult`."""
+    hands = (hand,) if hand is not None else ()
+    return FrameResult(hands=hands, width=width, height=height, frame_index=index,
+                       timestamp=timestamp)
 
 
 @pytest.fixture
 def hand_factory():
     """Return the :func:`make_hand` builder so tests can synthesise arbitrary poses."""
     return make_hand
+
+
+@pytest.fixture
+def frame_factory():
+    """Return the :func:`make_frame` builder for wrapping hands into frames."""
+    return make_frame
 
 
 @pytest.fixture
