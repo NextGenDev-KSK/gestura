@@ -89,6 +89,7 @@ ApplicationWindow {
                        font.pixelSize: Theme.fontS; Layout.alignment: Qt.AlignVCenter }
                 Item { Layout.fillWidth: true }
 
+                WinButton { glyph: "⚙"; onClicked: settingsPanel.open = true }
                 WinButton { glyph: "🌓"; onClicked: controller.setTheme(Theme.dark ? "light" : "dark") }
                 WinButton { glyph: "—"; onClicked: win.showMinimized() }
                 WinButton { glyph: "✕"; danger: true; onClicked: Qt.quit() }
@@ -316,6 +317,12 @@ ApplicationWindow {
             NumberAnimation { target: toast; property: "opacity"; to: 0; duration: 400 }
         }
     }
+
+    // Settings drawer (slides in from the right)
+    SettingsPanel { id: settingsPanel }
+
+    // Always-on-top status overlay (toggled in settings)
+    Overlay { visible: controller.showOverlay }
 
     // Inline window button component
     component WinButton: Rectangle {

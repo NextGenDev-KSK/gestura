@@ -2,3 +2,6 @@ singleton Theme 1.0 Theme.qml
 GlassPanel 1.0 GlassPanel.qml
 StatTile 1.0 StatTile.qml
 PillButton 1.0 PillButton.qml
+SettingRow 1.0 SettingRow.qml
+SettingsPanel 1.0 SettingsPanel.qml
+Overlay 1.0 Overlay.qml

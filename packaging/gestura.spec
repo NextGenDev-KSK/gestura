@@ -10,7 +10,17 @@ Output: ``dist/Gestura/Gestura.exe`` (+ its folder). The Inno Setup script in
 ``packaging/gestura_installer.iss`` wraps that folder into an installer.
 """
 
+import os
+
 from PyInstaller.utils.hooks import collect_all
+
+# SPECPATH is the directory holding this spec (packaging/); the repo root is its parent.
+ROOT = os.path.dirname(SPECPATH)  # noqa: F821 - SPECPATH is injected by PyInstaller
+
+
+def _p(*parts: str) -> str:
+    return os.path.join(ROOT, *parts)
+
 
 datas = []
 binaries = []
@@ -25,13 +35,15 @@ for pkg in ("mediapipe",):
 
 # Bundle our QML UI and the hand-landmark model.
 datas += [
-    ("src/gestura/app/qml", "gestura/app/qml"),
-    ("models/hand_landmarker.task", "models"),
+    (_p("src", "gestura", "app", "qml"), "gestura/app/qml"),
+    (_p("models", "hand_landmarker.task"), "models"),
 ]
 
+_icon = _p("assets", "icons", "gestura.ico")
+
 a = Analysis(
-    ["src/gestura/__main__.py"],
-    pathex=["src"],
+    [_p("src", "gestura", "__main__.py")],
+    pathex=[_p("src")],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
@@ -52,8 +64,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,          # windowed app (no console)
-    icon="assets/icons/gestura.ico" if __import__("os").path.exists(
-        "assets/icons/gestura.ico") else None,
+    icon=_icon if os.path.exists(_icon) else None,
 )
 
 coll = COLLECT(

@@ -10,8 +10,10 @@ the right thread.
 from __future__ import annotations
 
 import threading
+from enum import Enum
 
 import numpy as np
+from pydantic import ValidationError
 from PySide6.QtCore import Property, QObject, QPointF, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
 
@@ -34,6 +36,7 @@ class AppController(QObject):
     cameraStatusChanged = Signal()
     themeChanged = Signal()
     initErrorChanged = Signal()
+    settingsChanged = Signal()
     # Per-frame preview payload: (QImage frame, list[QPointF] normalized landmarks).
     frameReady = Signal(QImage, list)
     # A recognised gesture fired (name), for transient UI feedback.
@@ -188,6 +191,14 @@ class AppController(QObject):
     def theme(self) -> str:
         return self._settings.ui.theme.value
 
+    @Property(bool, notify=settingsChanged)
+    def showOverlay(self) -> bool:
+        return self._settings.ui.show_overlay
+
+    @Property(str, notify=settingsChanged)
+    def activeProfile(self) -> str:
+        return self._settings.active_profile
+
     # -- QML-invokable slots -------------------------------------------------------------------
     @Slot()
     def togglePause(self) -> None:
@@ -199,6 +210,56 @@ class AppController(QObject):
             self._settings.ui.theme = Theme(theme)
         except ValueError:
             return
+        self._persist()
+        self.themeChanged.emit()
+
+    # -- generic settings access for the settings panel ----------------------------------------
+    @Slot(str, result="QVariant")
+    def getSetting(self, path: str) -> object:
+        """Read a dotted settings path, e.g. ``profile.cursor.smoothing_beta``."""
+        try:
+            parent, attr = self._resolve(path)
+            value = getattr(parent, attr)
+        except (AttributeError, KeyError):
+            return None
+        return value.value if isinstance(value, Enum) else value
+
+    @Slot(str, float)
+    def setNumber(self, path: str, value: float) -> None:
+        self._set(path, value)
+
+    @Slot(str, bool)
+    def setBool(self, path: str, value: bool) -> None:
+        self._set(path, value)
+
+    def _set(self, path: str, value: object) -> None:
+        try:
+            parent, attr = self._resolve(path)
+            setattr(parent, attr, value)  # validate_assignment enforces ranges/types
+        except (AttributeError, KeyError, ValidationError):
+            _log.warning("Rejected settings write %s = %r", path, value)
+            return
+        self._persist()
+        self._pipeline.apply_settings(self._settings)
+        self.settingsChanged.emit()
+
+    def _resolve(self, path: str) -> tuple[object, str]:
+        """Return ``(parent_object, attribute_name)`` for a dotted path.
+
+        The ``profile.`` prefix targets the active profile; other roots (``ui``, ``paused``) are
+        looked up on the settings tree directly.
+        """
+        parts = path.split(".")
+        obj: object
+        if parts[0] == "profile":
+            obj = self._settings.profile()
+            parts = parts[1:]
+        else:
+            obj = self._settings
+        for name in parts[:-1]:
+            obj = getattr(obj, name)
+        return obj, parts[-1]
+
+    def _persist(self) -> None:
         if self._store is not None:
             self._store.save(self._settings)
-        self.themeChanged.emit()

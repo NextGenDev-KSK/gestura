@@ -29,3 +29,30 @@ def test_landmark_points_returns_21_for_a_hand(hand_factory, frame_factory) -> N
 
 def test_landmark_points_empty_without_hand(frame_factory) -> None:
     assert AppController._landmark_points(frame_factory(None, timestamp=0.0)) == []
+
+
+def test_controller_settings_roundtrip_and_validation(tmp_path) -> None:
+    from gestura.config.store import SettingsStore
+
+    store = SettingsStore(path=tmp_path / "settings.json")
+    settings = store.load()
+    ctrl = AppController(settings, store, dry_run=True)
+    try:
+        # Numeric round-trip through the dotted-path bridge.
+        ctrl.setNumber("profile.cursor.smoothing_beta", 0.25)
+        assert ctrl.getSetting("profile.cursor.smoothing_beta") == pytest.approx(0.25)
+
+        # Change is persisted to disk.
+        reloaded = SettingsStore(path=tmp_path / "settings.json").load()
+        assert reloaded.profile().cursor.smoothing_beta == pytest.approx(0.25)
+
+        # Boolean round-trip.
+        ctrl.setBool("ui.show_overlay", False)
+        assert ctrl.getSetting("ui.show_overlay") is False
+
+        # Out-of-range write is rejected, leaving the value valid.
+        before = ctrl.getSetting("profile.thresholds.min_confidence")
+        ctrl.setNumber("profile.thresholds.min_confidence", 5.0)  # invalid (> 1)
+        assert ctrl.getSetting("profile.thresholds.min_confidence") == before
+    finally:
+        ctrl.stop()
