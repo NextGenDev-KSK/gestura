@@ -5,6 +5,7 @@ from __future__ import annotations
 from .cursor import CursorController
 from .features import FeatureSet, extract
 from .interpreter import GestureInterpreter, InterpretationResult, Mode
+from .pipeline import GesturePipeline, PipelineTelemetry
 from .recognizers import Pose, classify_static_pose
 
 __all__ = [
@@ -14,6 +15,8 @@ __all__ = [
     "GestureInterpreter",
     "InterpretationResult",
     "Mode",
+    "GesturePipeline",
+    "PipelineTelemetry",
     "Pose",
     "classify_static_pose",
 ]
