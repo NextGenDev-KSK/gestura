@@ -28,8 +28,10 @@ from ..core.timing import RateEstimator
 from ..core.types import FrameResult
 from ..platform.base import OSAdapter
 from ..util.logging import get_logger
+from ..util.paths import data_dir
 from ..vision.camera import CameraSource, CameraStatus
 from ..vision.hand_tracker import HandTracker, ModelNotFoundError
+from .custom import CustomGestureClassifier
 from .interpreter import GestureInterpreter, InterpretationResult
 
 _log = get_logger("gestura.pipeline")
@@ -78,7 +80,8 @@ class GesturePipeline:
         self._external_status_cb = on_camera_status
         self._tracker_factory = tracker_factory
 
-        self._interpreter = GestureInterpreter(self._profile)
+        self._custom = CustomGestureClassifier.load(data_dir() / "custom_gestures.json")
+        self._interpreter = GestureInterpreter(self._profile, custom=self._custom)
         self._dispatcher = ActionDispatcher(
             adapter, self._profile, paused=settings.paused
         )

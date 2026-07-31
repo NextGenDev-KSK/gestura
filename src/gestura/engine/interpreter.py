@@ -23,8 +23,9 @@ from enum import Enum, auto
 
 from ..config.models import Profile
 from ..core.timing import Cooldown, StabilityGate
-from ..core.types import FrameResult, GestureEvent, GesturePhase
+from ..core.types import FrameResult, GestureEvent, GesturePhase, HandObservation
 from .cursor import CursorController
+from .custom import CustomGestureClassifier
 from .features import FeatureSet, extract
 from .recognizers import Pose, classify_static_pose
 
@@ -58,10 +59,12 @@ class InterpretationResult:
 class GestureInterpreter:
     """Converts a stream of :class:`FrameResult`\\s into gesture events + a cursor target."""
 
-    def __init__(self, profile: Profile) -> None:
+    def __init__(self, profile: Profile,
+                 custom: CustomGestureClassifier | None = None) -> None:
         self._profile = profile
         self._thr = profile.thresholds
         self.cursor = CursorController(profile.cursor)
+        self._custom = custom
 
         self._mode = Mode.IDLE
         self._pinch_closed = False
@@ -73,6 +76,12 @@ class GestureInterpreter:
         self._victory_gate = StabilityGate(self._thr.stability_time)
         self._pause_gate = StabilityGate(_PAUSE_HOLD)
         self._pause_latched = False
+
+        # Custom-gesture state.
+        self._custom_gate = StabilityGate(self._thr.stability_time * 2)
+        self._custom_cd = Cooldown(self._thr.default_cooldown)
+        self._custom_candidate: str | None = None
+        self._custom_active: str | None = None
 
         # Cooldowns for discrete/repeating actions.
         self._click_cd = Cooldown(_CLICK_COOLDOWN)
@@ -117,6 +126,7 @@ class GestureInterpreter:
         self._handle_middle_pinch(f, conf, result, now)
         self._handle_volume(pose, ok, conf, result, now)
         self._handle_pause(pose, ok, conf, result, now)
+        self._handle_custom(hand, result, now)
         return result
 
     # -- drag ----------------------------------------------------------------------------------
@@ -218,6 +228,30 @@ class GestureInterpreter:
         elif not held:
             self._pause_latched = False
 
+    # -- custom (user-trained) gestures --------------------------------------------------------
+    def _handle_custom(self, hand: HandObservation, result: InterpretationResult,
+                       now: float) -> None:
+        if self._custom is None:
+            return
+        match = self._custom.classify(hand)
+        name = match[0] if match else None
+
+        if name is None:
+            self._custom_gate.reset()
+            self._custom_candidate = None
+            self._custom_active = None
+            return
+        if name != self._custom_candidate:
+            self._custom_candidate = name
+            self._custom_gate.reset()
+
+        stable = self._custom_gate.update(True, now)
+        if stable and name != self._custom_active and self._custom_cd.try_fire(now):
+            confidence = match[1] if match else 0.0
+            result.events.append(GestureEvent(name, GesturePhase.BEGAN, confidence, timestamp=now))
+            result.events.append(GestureEvent(name, GesturePhase.ENDED, confidence, timestamp=now))
+            self._custom_active = name
+
     # -- helpers -------------------------------------------------------------------------------
     def _hysteresis(self, currently_closed: bool, distance: float) -> bool:
         """Inverted Schmitt trigger: closes below ``pinch_on``, opens above ``pinch_off``."""
@@ -237,9 +271,12 @@ class GestureInterpreter:
         self._pinch_closed = False
         self._middle_closed = False
         self._pause_latched = False
+        self._custom_candidate = None
+        self._custom_active = None
         self._fist_gate.reset()
         self._victory_gate.reset()
         self._pause_gate.reset()
+        self._custom_gate.reset()
         self.cursor.reset()
 
     def apply_profile(self, profile: Profile) -> None:

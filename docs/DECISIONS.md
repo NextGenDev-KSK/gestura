@@ -34,17 +34,23 @@ gesture engine needs. An optional GPU delegate is available without code changes
 
 ---
 
-## ADR-0003 — Custom-gesture classifier: ONNX Runtime
+## ADR-0003 — Custom-gesture classifier: prototype / nearest-neighbour
 
-**Decision.** User-recorded gestures are classified by a small model exported to ONNX and run
-with ONNX Runtime (CPU by default, `onnxruntime-gpu` optional).
+**Decision.** User-recorded gestures are recognised by a **nearest-prototype (k-NN) classifier**
+over a normalized 42-D landmark feature vector (translation/scale/rotation invariant). "Training"
+is simply storing the recorded example vectors; recognition is a nearest-neighbour distance test.
 
-**Alternatives.** Bundle a full training framework (PyTorch/TF) at runtime (heavy, > memory
-budget); pure rule-based only (can't learn arbitrary user gestures).
+**Alternatives.** ONNX Runtime + a trained MLP (the original plan) — needs a training framework to
+produce the model, adds a runtime dependency, and is overkill for static hand shapes; bundling
+PyTorch/TF at runtime (heavy, blows the memory budget); rule-based only (can't learn arbitrary
+user gestures).
 
-**Rationale.** Rule-based recognizers cover the built-in gestures deterministically and with zero
-latency; ONNX Runtime adds learned custom gestures with a tiny (< 30 MB) runtime footprint and no
-heavyweight training deps shipped to end users. Training happens offline in a dev/opt-in extra.
+**Rationale.** For static custom poses, a prototype classifier is *instant* to train, fully
+offline, explainable ("nearest to your recorded ‘peace’ example"), needs **zero extra
+dependencies** (just NumPy), and is easy to tune with a single distance threshold. The feature
+normalization makes a gesture recognisable regardless of hand position, distance, or in-plane
+rotation. This supersedes the earlier ONNX plan — we do not ship an unused inference runtime.
+(A learned classifier can be revisited if dynamic, motion-based custom gestures are added.)
 
 ---
 

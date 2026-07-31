@@ -31,7 +31,6 @@ dependencies = [
     "numpy>=1.26",                 # vector math (transitive of mediapipe, pinned explicitly)
     "PySide6>=6.6",                # Qt6 QML UI (LGPL) — GPU-accelerated glassmorphism
     "pydantic>=2.6",               # typed, validated configuration models
-    "onnxruntime>=1.17",           # inference for user-trained custom-gesture classifier
     "rich>=13.7",                  # structured, readable console logging/diagnostics
 
     "pillow>=10.2",                # screen capture (ImageGrab) for the screenshot action
@@ -51,7 +50,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
-gpu = ["onnxruntime-gpu>=1.17"]
+packaging = ["pyinstaller>=6.6"]
 
 [project.scripts]
 gestura = "gestura.__main__:main"
