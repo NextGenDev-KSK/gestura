@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from gestura.config.models import Profile
 from gestura.core.types import GesturePhase, HandObservation
 from gestura.engine.interpreter import GestureInterpreter, Mode
@@ -92,14 +94,63 @@ def test_thumb_up_emits_volume(hand_factory, frame_factory) -> None:
     assert "thumb_up" in _names(events, GesturePhase.UPDATED)
 
 
-def test_open_palm_hold_toggles_pause_once(hand_factory, frame_factory) -> None:
+def test_open_palm_does_nothing(hand_factory, frame_factory) -> None:
+    """Open palm is now a neutral rest pose — it must emit no gesture events."""
     interp = GestureInterpreter(Profile())
-    began_count = 0
-    for i in range(20):
-        r = interp.update(frame_factory(hand_factory("open"), timestamp=i * 0.1))
-        began_count += _names(r.events, GesturePhase.BEGAN).count("open_palm_hold")
-    # Fires exactly once for a single continuous hold (must be released to re-arm).
-    assert began_count == 1
+    events = []
+    for i in range(10):
+        events += interp.update(frame_factory(hand_factory("open"), timestamp=i * 0.1)).events
+    assert events == []
+
+
+@pytest.mark.parametrize("pose", ["three_fingers", "rock", "pinky", "thumb_left", "thumb_right"])
+def test_oneshot_pose_fires_once_per_hold(hand_factory, frame_factory, pose) -> None:
+    interp = GestureInterpreter(Profile())
+    began = 0
+    for i in range(15):  # hold the pose continuously
+        r = interp.update(frame_factory(hand_factory(pose), timestamp=i * 0.05))
+        began += _names(r.events, GesturePhase.BEGAN).count(pose)
+    assert began == 1  # one-shot: exactly one fire for a continuous hold
+
+
+def test_oneshot_rearms_after_release(hand_factory, frame_factory) -> None:
+    interp = GestureInterpreter(Profile())
+    t = 0.0
+
+    def hold(pose, n):
+        nonlocal t
+        fired = 0
+        for _ in range(n):
+            fired += _names(interp.update(frame_factory(hand_factory(pose), timestamp=t)).events,
+                            GesturePhase.BEGAN).count(pose)
+            t += 0.05
+        return fired
+
+    assert hold("rock", 5) == 1
+    hold("open", 5)          # release to a neutral pose
+    assert hold("rock", 5) == 1  # re-arms and fires again
+
+
+def test_pinky_pinch_emits_middle_click(hand_factory, frame_factory) -> None:
+    interp = GestureInterpreter(Profile())
+    interp.update(frame_factory(hand_factory("point"), timestamp=0.0))  # index out, no contact
+    result = interp.update(frame_factory(hand_factory("pinky_pinch"), timestamp=0.1))
+    assert "pinky_pinch" in _names(result.events, GesturePhase.BEGAN)
+
+
+def test_middle_and_pinky_pinch_do_not_cross_fire(hand_factory, frame_factory) -> None:
+    """A middle pinch must never also emit a pinky pinch and vice-versa."""
+    interp = GestureInterpreter(Profile())
+    interp.update(frame_factory(hand_factory("point"), timestamp=0.0))
+    r_mid = interp.update(frame_factory(hand_factory("middle_pinch"), timestamp=0.1))
+    assert "middle_pinch" in _names(r_mid.events)
+    assert "pinky_pinch" not in _names(r_mid.events)
+
+    interp2 = GestureInterpreter(Profile())
+    interp2.update(frame_factory(hand_factory("point"), timestamp=0.0))
+    r_pky = interp2.update(frame_factory(hand_factory("pinky_pinch"), timestamp=0.1))
+    assert "pinky_pinch" in _names(r_pky.events)
+    assert "middle_pinch" not in _names(r_pky.events)
 
 
 def test_tracking_loss_ends_drag_and_resets(hand_factory, frame_factory) -> None:

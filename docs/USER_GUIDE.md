@@ -27,26 +27,42 @@ gestura
 
 ## Built-in gestures
 
+Each sign uses a distinct hand shape, so they don't get confused with one another. The three
+pinches are told apart by **which finger meets the thumb**; the four thumb signs by **which way
+the thumb points** (a diagonal thumb is deliberately ignored).
+
 | Gesture | Action |
 |---------|--------|
 | Move your hand (index/middle knuckles) | Move the cursor |
-| **Pinch** index + thumb | Left click |
-| **Pinch** middle + thumb (index out) | Right click |
-| Two quick pinches | Double-click (via the OS) |
+| **Pinch** — index + thumb | Left click |
+| **Pinch** — middle + thumb (index out) | Right click |
+| **Pinch** — pinky + thumb (index out) | Middle click |
+| Two quick index pinches | Double-click (via the OS) |
 | **Fist** (hold) | Drag — grabs on close, drops on open |
 | **Two fingers** (index + middle), move up/down | Scroll |
-| **Thumb up / thumb down** | Volume up / down |
-| **Open palm**, hold ~0.8 s | Pause / resume all control |
+| **Rock** 🤘 (index + pinky) | Switch window (Alt-Tab) |
+| **Three fingers** (index + middle + ring) | Screenshot |
+| **Pinky** only | Media play / pause |
+| **Thumb up** (fist, thumb ↑) | Volume up |
+| **Thumb down** (fist, thumb ↓) | Volume down |
+| **Thumb left** (fist, thumb ←) | Previous track |
+| **Thumb right** (fist, thumb →) | Next track |
+| **Open palm** | Neutral — a natural rest pose that does nothing |
 
 Tips:
 - The cursor follows your **knuckles**, not your fingertip, so pinching to click never moves it.
-- If control ever feels wrong, hold an open palm to **pause** instantly.
+- Every sign is a *deliberately distinct* shape; hold it briefly and steadily to trigger. One-shot
+  signs (screenshot, switch window, media) fire once and re-arm only after you drop the pose.
+- Want more? The **gesture trainer** lets you record your own signs — see below.
+
+> **Changed from earlier builds:** the open-palm "pause" hold was removed (open palm is now just a
+> neutral rest pose). Pause/resume lives on the in-app button and can be re-bound to any gesture.
 
 ## The window
 
 - **Camera card** — live preview + skeleton, with a status dot (green = streaming, amber =
   reconnecting, red = disconnected) and a badge showing the current pose or PAUSED.
-- **Pause / Resume** — big button; also bound to the open-palm gesture.
+- **Pause / Resume** — big button (the instant kill-switch for all control).
 - **Stat tiles** — frame rate, latency, mode (Idle/Drag/Scroll), and hand-tracked state.
 - **Confidence meter** — detection confidence of the current hand.
 - **Theme toggle** — light / dark (🌓 in the title bar).

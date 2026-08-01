@@ -33,8 +33,14 @@ from .recognizers import Pose, classify_static_pose
 _SCROLL_GAIN = 22.0          # scroll "notches" per unit of normalized vertical hand travel
 _SCROLL_EPSILON = 0.12       # ignore scroll deltas smaller than this (jitter floor)
 _VOLUME_REPEAT = 0.10        # seconds between repeated volume nudges while a thumb pose is held
-_PAUSE_HOLD = 0.8            # open palm must be held this long to toggle pause (avoid accidents)
 _CLICK_COOLDOWN = 0.25       # min seconds between clicks (still allows a deliberate double-click)
+
+#: One-shot shape poses: each fires a single action when first held stably, and won't repeat until
+#: the hand leaves the pose. Kept distinct from the continuous (drag/scroll) and repeating (volume)
+#: gestures so nothing double-acts.
+_ONESHOT_POSES = frozenset({
+    Pose.THREE_FINGERS, Pose.PINKY, Pose.ROCK, Pose.THUMB_LEFT, Pose.THUMB_RIGHT,
+})
 
 
 class Mode(Enum):
@@ -69,13 +75,18 @@ class GestureInterpreter:
         self._mode = Mode.IDLE
         self._pinch_closed = False
         self._middle_closed = False
+        self._pinky_closed = False
         self._scroll_ref_y = 0.0
 
         # Stability gates for shape-based gestures.
         self._fist_gate = StabilityGate(self._thr.stability_time)
         self._victory_gate = StabilityGate(self._thr.stability_time)
-        self._pause_gate = StabilityGate(_PAUSE_HOLD)
-        self._pause_latched = False
+
+        # One-shot discrete-pose state (three-fingers, rock, pinky, thumb left/right).
+        self._discrete_gate = StabilityGate(self._thr.stability_time)
+        self._discrete_cd = Cooldown(self._thr.default_cooldown)
+        self._discrete_candidate: str | None = None
+        self._discrete_active: str | None = None
 
         # Custom-gesture state.
         self._custom_gate = StabilityGate(self._thr.stability_time * 2)
@@ -86,6 +97,7 @@ class GestureInterpreter:
         # Cooldowns for discrete/repeating actions.
         self._click_cd = Cooldown(_CLICK_COOLDOWN)
         self._rclick_cd = Cooldown(_CLICK_COOLDOWN)
+        self._mclick_cd = Cooldown(_CLICK_COOLDOWN)
         self._volume_cd = Cooldown(_VOLUME_REPEAT)
 
     @property
@@ -124,8 +136,9 @@ class GestureInterpreter:
         # 3) Discrete/idle gestures.
         self._handle_pinch(f, conf, result, now)
         self._handle_middle_pinch(f, conf, result, now)
+        self._handle_pinky_pinch(f, conf, result, now)
         self._handle_volume(pose, ok, conf, result, now)
-        self._handle_pause(pose, ok, conf, result, now)
+        self._handle_discrete(pose, ok, conf, result, now)
         self._handle_custom(hand, result, now)
         return result
 
@@ -187,39 +200,60 @@ class GestureInterpreter:
 
     # -- middle pinch / right click ------------------------------------------------------------
     def _handle_middle_pinch(self, f: FeatureSet, conf, result, now) -> None:
-        # Right-click pinch requires the index extended, distinguishing it from a fist/left pinch.
-        allowed = f.extended["index"]
+        # Right-click pinch needs the index extended (not a fist/left pinch) AND the middle to be
+        # the finger actually touching the thumb — otherwise a pinky pinch could double-trigger.
+        allowed = f.extended["index"] and f.pinch_middle_norm <= f.pinch_pinky_norm
         closed = self._hysteresis(
             self._middle_closed, f.pinch_middle_norm if allowed else 1.0
         )
         if closed and not self._middle_closed and self._rclick_cd.try_fire(now):
-            result.events.append(
-                GestureEvent(
-                    "middle_pinch", GesturePhase.BEGAN, conf, position=result.cursor, timestamp=now
-                )
-            )
-            result.events.append(
-                GestureEvent(
-                    "middle_pinch", GesturePhase.ENDED, conf, position=result.cursor, timestamp=now
-                )
-            )
+            result.events.append(GestureEvent(
+                "middle_pinch", GesturePhase.BEGAN, conf, position=result.cursor, timestamp=now))
+            result.events.append(GestureEvent(
+                "middle_pinch", GesturePhase.ENDED, conf, position=result.cursor, timestamp=now))
         self._middle_closed = closed
+
+    # -- pinky pinch / middle click ------------------------------------------------------------
+    def _handle_pinky_pinch(self, f: FeatureSet, conf, result, now) -> None:
+        # Mirror of the middle pinch: index extended, and the pinky must be the *closest* finger
+        # to the thumb so it can never be confused with a middle pinch.
+        allowed = f.extended["index"] and f.pinch_pinky_norm < f.pinch_middle_norm
+        closed = self._hysteresis(
+            self._pinky_closed, f.pinch_pinky_norm if allowed else 1.0
+        )
+        if closed and not self._pinky_closed and self._mclick_cd.try_fire(now):
+            result.events.append(GestureEvent(
+                "pinky_pinch", GesturePhase.BEGAN, conf, position=result.cursor, timestamp=now))
+            result.events.append(GestureEvent(
+                "pinky_pinch", GesturePhase.ENDED, conf, position=result.cursor, timestamp=now))
+        self._pinky_closed = closed
 
     # -- volume (thumb up/down) ----------------------------------------------------------------
     def _handle_volume(self, pose, ok, conf, result, now) -> None:
         if pose in (Pose.THUMB_UP, Pose.THUMB_DOWN) and ok and self._volume_cd.try_fire(now):
             result.events.append(GestureEvent(pose, GesturePhase.UPDATED, conf, timestamp=now))
 
-    # -- pause toggle (open palm hold) ---------------------------------------------------------
-    def _handle_pause(self, pose, ok, conf, result, now) -> None:
-        held = self._pause_gate.update(pose == Pose.OPEN_PALM and ok, now)
-        if held and not self._pause_latched:
-            self._pause_latched = True
-            result.events.append(
-                GestureEvent("open_palm_hold", GesturePhase.BEGAN, conf, timestamp=now)
-            )
-        elif not held:
-            self._pause_latched = False
+    # -- one-shot discrete poses (screenshot, media, window, …) --------------------------------
+    def _handle_discrete(self, pose, ok, conf, result, now) -> None:
+        """Fire a one-shot event when a discrete shape pose is first held stably.
+
+        A single stability gate + "active pose" latch means each pose fires exactly once and only
+        re-arms after the hand leaves it — so holding, say, the rock sign can't spam Alt-Tab.
+        """
+        candidate = pose if (pose in _ONESHOT_POSES and ok) else None
+        if candidate is None:
+            self._discrete_gate.reset()
+            self._discrete_candidate = None
+            self._discrete_active = None
+            return
+        if candidate != self._discrete_candidate:
+            self._discrete_candidate = candidate
+            self._discrete_gate.reset()
+        stable = self._discrete_gate.update(True, now)
+        if stable and candidate != self._discrete_active and self._discrete_cd.try_fire(now):
+            result.events.append(GestureEvent(candidate, GesturePhase.BEGAN, conf, timestamp=now))
+            result.events.append(GestureEvent(candidate, GesturePhase.ENDED, conf, timestamp=now))
+            self._discrete_active = candidate
 
     # -- custom (user-trained) gestures --------------------------------------------------------
     def _handle_custom(self, hand: HandObservation, result: InterpretationResult,
@@ -263,12 +297,14 @@ class GestureInterpreter:
         self._mode = Mode.IDLE
         self._pinch_closed = False
         self._middle_closed = False
-        self._pause_latched = False
+        self._pinky_closed = False
+        self._discrete_candidate = None
+        self._discrete_active = None
         self._custom_candidate = None
         self._custom_active = None
         self._fist_gate.reset()
         self._victory_gate.reset()
-        self._pause_gate.reset()
+        self._discrete_gate.reset()
         self._custom_gate.reset()
         self.cursor.reset()
 

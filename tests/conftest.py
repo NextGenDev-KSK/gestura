@@ -68,15 +68,22 @@ def _place_chain(base: np.ndarray, direction: np.ndarray, *, curled: bool, seg: 
 
 
 # Which of the four fingers are curled for each pose (thumb handled separately).
+_ALL_FINGERS = {"index", "middle", "ring", "pinky"}
 _CURLED_FINGERS: dict[str, set[str]] = {
     "open": set(),
-    "fist": {"index", "middle", "ring", "pinky"},
+    "fist": set(_ALL_FINGERS),
     "point": {"middle", "ring", "pinky"},
     "victory": {"ring", "pinky"},
+    "three_fingers": {"pinky"},
+    "rock": {"middle", "ring"},
+    "pinky": {"index", "middle", "ring"},
     "pinch": set(),          # fingers stay open; index/thumb tips overridden to touch
     "middle_pinch": set(),   # index stays extended; middle/thumb tips overridden to touch
-    "thumb_up": {"index", "middle", "ring", "pinky"},
-    "thumb_down": {"index", "middle", "ring", "pinky"},
+    "pinky_pinch": {"middle", "ring"},  # index extended; pinky/thumb tips overridden to touch
+    "thumb_up": set(_ALL_FINGERS),
+    "thumb_down": set(_ALL_FINGERS),
+    "thumb_left": set(_ALL_FINGERS),
+    "thumb_right": set(_ALL_FINGERS),
 }
 
 
@@ -84,8 +91,9 @@ def make_hand(pose: str = "open", *, handedness: Handedness = Handedness.RIGHT,
               score: float = 0.99) -> HandObservation:
     """Build a synthetic :class:`HandObservation` for a named ``pose``.
 
-    Supported poses: ``open``, ``fist``, ``point``, ``victory``, ``pinch`` (index+thumb touch),
-    ``middle_pinch`` (middle+thumb touch, index extended), ``thumb_up``, ``thumb_down``.
+    Supported poses: ``open``, ``fist``, ``point``, ``victory``, ``three_fingers``, ``rock``,
+    ``pinky``, ``pinch`` (index+thumb touch), ``middle_pinch``, ``pinky_pinch``,
+    ``thumb_up``, ``thumb_down``, ``thumb_left``, ``thumb_right``.
     """
     if pose not in _CURLED_FINGERS:
         raise ValueError(f"unknown pose {pose!r}")
@@ -100,11 +108,16 @@ def make_hand(pose: str = "open", *, handedness: Handedness = Handedness.RIGHT,
         for idx, p in zip(chain, pts, strict=True):
             lm[int(idx), :2] = p
 
-    # Thumb: direction + length depend on the pose.
+    # Thumb: direction + length depend on the pose. Directional thumbs use a longer, cardinal
+    # vector (with a slight upward bias on left/right to clear the CMC's low starting point).
     if pose == "thumb_up":
-        thumb_dir, thumb_seg = _UP.copy(), 0.12
+        thumb_dir, thumb_seg = np.array([0.0, -1.0]), 0.14
     elif pose == "thumb_down":
-        thumb_dir, thumb_seg = -_UP.copy(), 0.12
+        thumb_dir, thumb_seg = np.array([0.0, 1.0]), 0.14
+    elif pose == "thumb_left":
+        thumb_dir, thumb_seg = np.array([-1.0, -0.2]), 0.14
+    elif pose == "thumb_right":
+        thumb_dir, thumb_seg = np.array([1.0, -0.2]), 0.14
     else:
         thumb_dir, thumb_seg = np.array([-0.55, -0.83]), 0.07
     thumb_dir = thumb_dir / np.linalg.norm(thumb_dir)
@@ -121,6 +134,10 @@ def make_hand(pose: str = "open", *, handedness: Handedness = Handedness.RIGHT,
     elif pose == "middle_pinch":
         p = _ANCHORS[HandLandmark.MIDDLE_MCP] + _UP * 0.13
         lm[int(HandLandmark.MIDDLE_TIP), :2] = p
+        lm[int(HandLandmark.THUMB_TIP), :2] = p + np.array([0.004, 0.0])
+    elif pose == "pinky_pinch":
+        p = _ANCHORS[HandLandmark.PINKY_MCP] + _UP * 0.10
+        lm[int(HandLandmark.PINKY_TIP), :2] = p
         lm[int(HandLandmark.THUMB_TIP), :2] = p + np.array([0.004, 0.0])
 
     return HandObservation(landmarks=lm, handedness=handedness, score=score)

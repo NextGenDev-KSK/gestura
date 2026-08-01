@@ -263,26 +263,38 @@ ApplicationWindow {
                 GlassPanel {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Column {
+                    ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: Theme.pad
-                        spacing: 10
+                        spacing: 8
                         Text { text: "GESTURES"; color: Theme.subtext
                                font.pixelSize: Theme.fontS; font.letterSpacing: 1.2 }
-                        Repeater {
+                        ListView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: 7
+                            boundsBehavior: Flickable.StopAtBounds
                             model: [
-                                { g: "👌  Pinch", a: "Left click" },
+                                { g: "👌  Pinch (index)", a: "Left click" },
                                 { g: "🤏  Middle pinch", a: "Right click" },
-                                { g: "✊  Fist", a: "Drag" },
-                                { g: "✌  Two fingers", a: "Scroll" },
-                                { g: "👍  Thumb up / down", a: "Volume" },
-                                { g: "🖐  Open palm (hold)", a: "Pause / resume" }
+                                { g: "🤞  Pinky pinch", a: "Middle click" },
+                                { g: "✊  Fist", a: "Drag / drop" },
+                                { g: "✌️  Two fingers", a: "Scroll" },
+                                { g: "🤘  Rock (index+pinky)", a: "Switch window" },
+                                { g: "3️⃣  Three fingers", a: "Screenshot" },
+                                { g: "🤙  Pinky", a: "Play / pause" },
+                                { g: "👍  Thumb up", a: "Volume up" },
+                                { g: "👎  Thumb down", a: "Volume down" },
+                                { g: "👈  Thumb left", a: "Previous track" },
+                                { g: "👉  Thumb right", a: "Next track" }
                             ]
-                            Row {
-                                width: parent.width
+                            delegate: Row {
+                                width: ListView.view.width
                                 spacing: 8
                                 Text { text: modelData.g; color: Theme.text
-                                       font.pixelSize: Theme.fontM; width: parent.width * 0.55 }
+                                       font.pixelSize: Theme.fontM; width: parent.width * 0.55
+                                       elide: Text.ElideRight }
                                 Text { text: modelData.a; color: Theme.subtext
                                        font.pixelSize: Theme.fontM }
                             }

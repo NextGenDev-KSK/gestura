@@ -148,11 +148,20 @@ class AppSettings(_Model):
 # The out-of-the-box gesture vocabulary. Cursor motion is continuous and handled by CursorConfig;
 # these are the discrete/modal actions. Names correspond to recognizers in gestura.engine.
 DEFAULT_BINDINGS: tuple[GestureBinding, ...] = (
-    GestureBinding(gesture="pinch", action="left_click"),
-    GestureBinding(gesture="middle_pinch", action="right_click"),
-    GestureBinding(gesture="fist", action="drag"),  # hold to drag, release to drop
-    GestureBinding(gesture="two_finger_scroll", action="scroll"),
+    # Contact (pinch) gestures — distinguished by which finger meets the thumb.
+    GestureBinding(gesture="pinch", action="left_click"),          # index + thumb
+    GestureBinding(gesture="middle_pinch", action="right_click"),  # middle + thumb
+    GestureBinding(gesture="pinky_pinch", action="middle_click"),  # pinky + thumb
+    # Continuous modes.
+    GestureBinding(gesture="fist", action="drag"),                 # hold to drag, release to drop
+    GestureBinding(gesture="two_finger_scroll", action="scroll"),  # victory + vertical move
+    # Directional thumb (fist + thumb pointing) — cardinal directions only.
     GestureBinding(gesture="thumb_up", action="volume_up", params={"amount": 2.0}),
     GestureBinding(gesture="thumb_down", action="volume_down", params={"amount": 2.0}),
-    GestureBinding(gesture="open_palm_hold", action="pause_toggle"),
+    GestureBinding(gesture="thumb_left", action="media_prev"),
+    GestureBinding(gesture="thumb_right", action="media_next"),
+    # One-shot shape poses — each a distinct extended-finger pattern.
+    GestureBinding(gesture="three_fingers", action="screenshot"),      # index+middle+ring
+    GestureBinding(gesture="rock", action="switch_window"),            # index+pinky ("horns")
+    GestureBinding(gesture="pinky", action="media_play_pause"),        # pinky only
 )

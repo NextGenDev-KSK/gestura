@@ -35,12 +35,20 @@ class FeatureSet:
     pinch_index_norm: float   # thumb tip <-> index tip
     pinch_middle_norm: float  # thumb tip <-> middle tip
 
+    pinch_pinky_norm: float   # thumb tip <-> pinky tip
+
     anchor: tuple[float, float]        # stable cursor anchor (knuckle-based, click-immune)
     palm_center: tuple[float, float]
     index_tip: tuple[float, float]
 
-    # Vertical placement of the thumb tip relative to the knuckles, for thumb up/down.
-    thumb_vertical_offset: float  # negative => thumb above knuckles (up); positive => below
+    # Thumb tip position relative to the knuckle, in palm-width units, for thumb-direction poses.
+    # x: negative => thumb left of knuckles; y: negative => thumb above knuckles.
+    thumb_offset: tuple[float, float]
+
+    @property
+    def thumb_vertical_offset(self) -> float:
+        """Vertical component of :attr:`thumb_offset` (negative = thumb above the knuckles)."""
+        return self.thumb_offset[1]
 
     def is_only(self, *fingers: str) -> bool:
         """True iff exactly the named fingers are extended and no others."""
@@ -56,6 +64,7 @@ def extract(hand: HandObservation) -> FeatureSet:
 
     pinch_index = normalized_distance(hand, HandLandmark.THUMB_TIP, HandLandmark.INDEX_TIP)
     pinch_middle = normalized_distance(hand, HandLandmark.THUMB_TIP, HandLandmark.MIDDLE_TIP)
+    pinch_pinky = normalized_distance(hand, HandLandmark.THUMB_TIP, HandLandmark.PINKY_TIP)
 
     # Cursor anchor: midpoint of the index & middle knuckles. Unlike a fingertip this barely
     # moves when the user pinches or curls fingers, so clicking never nudges the cursor.
@@ -77,9 +86,9 @@ def extract(hand: HandObservation) -> FeatureSet:
     index_tip = hand.point(HandLandmark.INDEX_TIP)[:2]
 
     scale = palm_width(hand) or 1.0
-    knuckle_y = hand.point(HandLandmark.MIDDLE_MCP)[1]
-    thumb_tip_y = hand.point(HandLandmark.THUMB_TIP)[1]
-    thumb_vertical_offset = (thumb_tip_y - knuckle_y) / scale
+    knuckle = hand.point(HandLandmark.MIDDLE_MCP)[:2]
+    thumb_tip = hand.point(HandLandmark.THUMB_TIP)[:2]
+    thumb_offset = (thumb_tip - knuckle) / scale
 
     return FeatureSet(
         handedness=hand.handedness,
@@ -88,8 +97,9 @@ def extract(hand: HandObservation) -> FeatureSet:
         num_extended=num_extended,
         pinch_index_norm=pinch_index,
         pinch_middle_norm=pinch_middle,
+        pinch_pinky_norm=pinch_pinky,
         anchor=(float(anchor_xy[0]), float(anchor_xy[1])),
         palm_center=(float(palm_center[0]), float(palm_center[1])),
         index_tip=(float(index_tip[0]), float(index_tip[1])),
-        thumb_vertical_offset=float(thumb_vertical_offset),
+        thumb_offset=(float(thumb_offset[0]), float(thumb_offset[1])),
     )

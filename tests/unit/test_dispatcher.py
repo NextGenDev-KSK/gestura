@@ -70,10 +70,15 @@ def test_cursor_moves_when_active_but_not_when_paused() -> None:
 
 def test_pause_toggle_and_suppression() -> None:
     adapter = RecordingAdapter()
-    disp = ActionDispatcher(adapter, Profile())
+    # pause_toggle is no longer bound to a default gesture; bind it explicitly here.
+    profile = Profile(bindings=[
+        GestureBinding(gesture="pinch", action="left_click"),
+        GestureBinding(gesture="pause_sign", action="pause_toggle"),
+    ])
+    disp = ActionDispatcher(adapter, profile)
 
-    # Open-palm hold toggles pause on.
-    disp.dispatch(_result(_ev("open_palm_hold", GesturePhase.BEGAN)))
+    # A pause-bound gesture toggles pause on.
+    disp.dispatch(_result(_ev("pause_sign", GesturePhase.BEGAN)))
     assert disp.paused is True
 
     # While paused, a pinch does nothing.
@@ -81,8 +86,17 @@ def test_pause_toggle_and_suppression() -> None:
     assert "click" not in adapter.names()
 
     # The same gesture resumes.
-    disp.dispatch(_result(_ev("open_palm_hold", GesturePhase.BEGAN)))
+    disp.dispatch(_result(_ev("pause_sign", GesturePhase.BEGAN)))
     assert disp.paused is False
+
+
+def test_middle_and_pinky_pinch_map_to_distinct_clicks() -> None:
+    adapter = RecordingAdapter()
+    disp = ActionDispatcher(adapter, Profile())
+    disp.dispatch(_result(_ev("middle_pinch", GesturePhase.BEGAN)))
+    disp.dispatch(_result(_ev("pinky_pinch", GesturePhase.BEGAN)))
+    assert adapter.actions[0].args == (MouseButton.RIGHT,)
+    assert adapter.actions[1].args == (MouseButton.MIDDLE,)
 
 
 def test_unknown_action_is_ignored_gracefully() -> None:
