@@ -12,7 +12,7 @@ Output: ``dist/Gestura/Gestura.exe`` (+ its folder). The Inno Setup script in
 
 import os
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, get_module_file_attribute
 
 # SPECPATH is the directory holding this spec (packaging/); the repo root is its parent.
 ROOT = os.path.dirname(SPECPATH)  # noqa: F821 - SPECPATH is injected by PyInstaller
@@ -32,6 +32,15 @@ for pkg in ("mediapipe",):
     datas += pkg_datas
     binaries += pkg_binaries
     hiddenimports += pkg_hidden
+
+# Our QML uses Qt Quick modules (Controls.Basic, Effects, Layouts) that are loaded as *runtime*
+# plugins — PyInstaller can't discover them from the .qml text, so bundle the PySide6 QML module
+# tree and Qt plugins explicitly, or the frozen app's UI fails to load.
+_pyside = os.path.dirname(get_module_file_attribute("PySide6"))
+for _sub in ("qml", "plugins"):
+    _src = os.path.join(_pyside, _sub)
+    if os.path.isdir(_src):
+        datas.append((_src, f"PySide6/{_sub}"))
 
 # Bundle our QML UI and the hand-landmark model.
 datas += [
