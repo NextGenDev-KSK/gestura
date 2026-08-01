@@ -209,15 +209,25 @@ class WindowsAdapter(OSAdapter):
         if self._volume is not None or self._volume_failed:
             return self._volume
         try:
-            from ctypes import POINTER, cast
-
             import comtypes
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            from pycaw.pycaw import AudioUtilities
 
             comtypes.CoInitialize()
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, comtypes.CLSCTX_ALL, None)
-            self._volume = cast(interface, POINTER(IAudioEndpointVolume))
+            speakers = AudioUtilities.GetSpeakers()
+            # Modern pycaw returns an AudioDevice wrapper exposing the already-cast endpoint
+            # volume interface. Fall back to the legacy IMMDevice.Activate path for older pycaw.
+            endpoint = getattr(speakers, "EndpointVolume", None)
+            if endpoint is not None:
+                self._volume = endpoint
+            else:
+                from ctypes import POINTER, cast
+
+                from pycaw.pycaw import IAudioEndpointVolume
+
+                interface = speakers.Activate(
+                    IAudioEndpointVolume._iid_, comtypes.CLSCTX_ALL, None
+                )
+                self._volume = cast(interface, POINTER(IAudioEndpointVolume))
         except Exception:
             _log.exception("Volume control unavailable; falling back to media keys")
             self._volume_failed = True
