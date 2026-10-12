@@ -13,7 +13,8 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
 
 #: Bumped whenever the on-disk schema changes in a way that needs migration.
-SCHEMA_VERSION = 1
+#: v2: two-hand tracking by default, new default gesture vocabulary (see config/store.py).
+SCHEMA_VERSION = 2
 
 
 class _Model(BaseModel):
@@ -43,7 +44,9 @@ class CameraConfig(_Model):
 class TrackingConfig(_Model):
     """MediaPipe HandLandmarker parameters."""
 
-    max_hands: int = Field(1, ge=1, le=2)
+    # Two hands are tracked by default so the two-hand pinch-to-zoom gesture works out of the box.
+    # Set to 1 for a small performance gain if you never use two-hand gestures.
+    max_hands: int = Field(2, ge=1, le=2)
     min_detection_confidence: float = Field(0.5, ge=0.0, le=1.0)
     min_presence_confidence: float = Field(0.5, ge=0.0, le=1.0)
     min_tracking_confidence: float = Field(0.5, ge=0.0, le=1.0)
@@ -90,6 +93,10 @@ class GestureBinding(_Model):
     params: dict[str, float] = Field(
         default_factory=dict, description="Action parameters, e.g. {'amount': 3} scroll steps"
     )
+    shortcut: list[str] = Field(
+        default_factory=list,
+        description="Key chord for the 'run_shortcut' action, e.g. ['ctrl', 'c'] or ['alt', 'f4']",
+    )
 
 
 class CustomGesture(_Model):
@@ -108,7 +115,9 @@ class Profile(_Model):
     tracking: TrackingConfig = Field(default_factory=TrackingConfig)
     cursor: CursorConfig = Field(default_factory=CursorConfig)
     thresholds: GestureThresholds = Field(default_factory=GestureThresholds)
-    bindings: list[GestureBinding] = Field(default_factory=lambda: list(DEFAULT_BINDINGS))
+    # Deep copies: the gesture editor mutates bindings in place, which must never reach the shared
+    # module-level DEFAULT_BINDINGS (that would also corrupt "reset to defaults").
+    bindings: list[GestureBinding] = Field(default_factory=lambda: default_bindings())
 
 
 class UiConfig(_Model):
@@ -155,6 +164,7 @@ DEFAULT_BINDINGS: tuple[GestureBinding, ...] = (
     # Continuous modes.
     GestureBinding(gesture="fist", action="drag"),                 # hold to drag, release to drop
     GestureBinding(gesture="two_finger_scroll", action="scroll"),  # victory + vertical move
+    GestureBinding(gesture="zoom", action="zoom"),                 # two-hand pinch, spread apart
     # Directional thumb (fist + thumb pointing) — cardinal directions only.
     GestureBinding(gesture="thumb_up", action="volume_up", params={"amount": 2.0}),
     GestureBinding(gesture="thumb_down", action="volume_down", params={"amount": 2.0}),
@@ -165,3 +175,8 @@ DEFAULT_BINDINGS: tuple[GestureBinding, ...] = (
     GestureBinding(gesture="rock", action="switch_window"),            # index+pinky ("horns")
     GestureBinding(gesture="pinky", action="media_play_pause"),        # pinky only
 )
+
+
+def default_bindings() -> list[GestureBinding]:
+    """A fresh, independently-editable copy of the built-in gesture map."""
+    return [b.model_copy(deep=True) for b in DEFAULT_BINDINGS]

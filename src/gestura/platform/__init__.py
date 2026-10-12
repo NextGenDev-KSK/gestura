@@ -10,15 +10,18 @@ from __future__ import annotations
 import sys
 
 from .base import (
+    SHORTCUT_KEYS,
     MediaAction,
     MouseButton,
     OSAdapter,
     RecordedAction,
     RecordingAdapter,
     WindowAction,
+    parse_shortcut,
 )
 
 __all__ = [
+    "SHORTCUT_KEYS",
     "MediaAction",
     "MouseButton",
     "OSAdapter",
@@ -26,6 +29,7 @@ __all__ = [
     "RecordingAdapter",
     "WindowAction",
     "get_adapter",
+    "parse_shortcut",
 ]
 
 

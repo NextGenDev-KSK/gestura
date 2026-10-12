@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from .dispatcher import ActionDispatcher
-from .registry import ACTIONS, ActionContext, ActionSpec, EngineControl, all_actions, get_action
+from .registry import (
+    ACTIONS,
+    ActionContext,
+    ActionSpec,
+    EngineControl,
+    actions_for,
+    all_actions,
+    get_action,
+)
 
 __all__ = [
     "ACTIONS",
@@ -11,6 +19,7 @@ __all__ = [
     "ActionDispatcher",
     "ActionSpec",
     "EngineControl",
+    "actions_for",
     "all_actions",
     "get_action",
 ]

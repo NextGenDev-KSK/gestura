@@ -81,3 +81,64 @@ def test_save_is_atomic_no_temp_left_behind(tmp_path) -> None:
     store.save(AppSettings())
     leftovers = list(tmp_path.glob(".settings-*.tmp"))
     assert leftovers == []
+
+
+def _v1_settings(**tracking) -> dict:
+    """A settings file as v1 builds wrote it: old default bindings, one tracked hand."""
+    return {
+        "schema_version": 1,
+        "active_profile": "Default",
+        "profiles": {"Default": {
+            "tracking": {"max_hands": 1, **tracking},
+            "cursor": {"smoothing_min_cutoff": 4.4},
+            "bindings": [
+                {"gesture": "pinch", "action": "left_click"},
+                {"gesture": "fist", "action": "drag"},
+                # The user had re-bound thumb-up; that choice must survive the migration.
+                {"gesture": "thumb_up", "action": "brightness_up"},
+                {"gesture": "open_palm_hold", "action": "pause_toggle"},  # retired gesture
+            ],
+        }},
+    }
+
+
+def test_v1_settings_migrate_to_the_current_gesture_set(tmp_path) -> None:
+    from gestura.config.models import DEFAULT_BINDINGS, SCHEMA_VERSION
+
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps(_v1_settings()), encoding="utf-8")
+    profile = SettingsStore(path=path).load().profile()
+
+    by_gesture = {b.gesture: b.action for b in profile.bindings}
+    assert "open_palm_hold" not in by_gesture                 # retired binding dropped
+    assert by_gesture["thumb_up"] == "brightness_up"          # user's edit kept
+    assert by_gesture["zoom"] == "zoom"                       # new defaults added
+    assert by_gesture["pinky_pinch"] == "middle_click"
+    assert set(by_gesture) == {b.gesture for b in DEFAULT_BINDINGS}
+    assert len(profile.bindings) == len(by_gesture)           # no duplicates
+    assert profile.tracking.max_hands == 2                    # two-hand zoom needs it
+    assert profile.cursor.smoothing_min_cutoff == pytest.approx(4.4)  # tuning untouched
+
+    # The upgrade is persisted, so it runs once.
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == SCHEMA_VERSION
+
+
+def test_migration_is_not_reapplied_to_current_files(tmp_path) -> None:
+    store = SettingsStore(path=tmp_path / "settings.json")
+    settings = store.load()
+    settings.profile().tracking.max_hands = 1  # a deliberate choice in a v2 file
+    settings.profile().bindings = [b for b in settings.profile().bindings if b.gesture != "rock"]
+    store.save(settings)
+
+    reloaded = SettingsStore(path=tmp_path / "settings.json").load().profile()
+    assert reloaded.tracking.max_hands == 1
+    assert all(b.gesture != "rock" for b in reloaded.bindings)
+
+
+def test_default_bindings_are_independent_copies() -> None:
+    from gestura.config.models import DEFAULT_BINDINGS
+
+    a, b = Profile(), Profile()
+    a.bindings[0].action = "screenshot"
+    assert b.bindings[0].action != "screenshot"
+    assert DEFAULT_BINDINGS[0].action != "screenshot"

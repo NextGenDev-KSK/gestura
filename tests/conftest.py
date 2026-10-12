@@ -151,6 +151,21 @@ def make_frame(hand: HandObservation | None, *, timestamp: float, index: int = 0
                        timestamp=timestamp)
 
 
+def make_multi_frame(hands: list[HandObservation], *, timestamp: float, index: int = 0,
+                     width: int = 640, height: int = 480) -> FrameResult:
+    """Wrap several hands in one :class:`FrameResult` (for two-hand gestures like zoom)."""
+    return FrameResult(hands=tuple(hands), width=width, height=height, frame_index=index,
+                       timestamp=timestamp)
+
+
+def shift_hand(hand: HandObservation, dx: float = 0.0, dy: float = 0.0) -> HandObservation:
+    """Return a copy of ``hand`` translated in the frame (for building multi-hand layouts)."""
+    lm = hand.landmarks.copy()
+    lm[:, 0] += dx
+    lm[:, 1] += dy
+    return HandObservation(lm, hand.handedness, hand.score)
+
+
 @pytest.fixture
 def hand_factory():
     """Return the :func:`make_hand` builder so tests can synthesise arbitrary poses."""
@@ -161,6 +176,18 @@ def hand_factory():
 def frame_factory():
     """Return the :func:`make_frame` builder for wrapping hands into frames."""
     return make_frame
+
+
+@pytest.fixture
+def multi_frame_factory():
+    """Return the :func:`make_multi_frame` builder for multi-hand frames."""
+    return make_multi_frame
+
+
+@pytest.fixture
+def shift():
+    """Return the :func:`shift_hand` translate helper."""
+    return shift_hand
 
 
 @pytest.fixture

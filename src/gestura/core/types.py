@@ -135,6 +135,26 @@ class GesturePhase(Enum):
     ENDED = "ended"
 
 
+class GestureKind(Enum):
+    """The *shape over time* of the events a gesture emits — what an action can rely on.
+
+    Binding an action to a gesture only works if the gesture produces the phases (and payload)
+    the action listens for, so the gesture editor uses this to offer compatible actions only.
+
+    * ``TAP``    — ``BEGAN`` + ``ENDED`` in the same frame (pinches, one-shot signs, custom).
+    * ``HOLD``   — ``BEGAN`` … ``ENDED`` spanning the time the pose is held (fist).
+    * ``REPEAT`` — repeated ``UPDATED`` while held, no begin/end (thumb up/down).
+    * ``SCROLL`` — ``UPDATED`` carrying a ``dy`` delta (two-finger scroll).
+    * ``ZOOM``   — ``UPDATED`` carrying a ``scale`` delta (two-hand pinch).
+    """
+
+    TAP = "tap"
+    HOLD = "hold"
+    REPEAT = "repeat"
+    SCROLL = "scroll"
+    ZOOM = "zoom"
+
+
 @dataclass(slots=True, frozen=True)
 class GestureEvent:
     """A recognised gesture emitted by the engine for the dispatcher to act on.

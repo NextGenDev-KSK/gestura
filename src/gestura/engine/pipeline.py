@@ -20,23 +20,27 @@ import argparse
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
 from ..actions.dispatcher import ActionDispatcher
 from ..config.models import AppSettings
 from ..core.timing import RateEstimator
-from ..core.types import FrameResult
+from ..core.types import FrameResult, GesturePhase
 from ..platform.base import OSAdapter
 from ..util.logging import get_logger
 from ..util.paths import data_dir
 from ..vision.camera import CameraSource, CameraStatus
 from ..vision.hand_tracker import HandTracker, ModelNotFoundError
-from .custom import CustomGestureClassifier
+from .custom import CustomGestureClassifier, landmark_feature
 from .interpreter import GestureInterpreter, InterpretationResult
 
 _log = get_logger("gestura.pipeline")
+
+CUSTOM_GESTURES_FILENAME = "custom_gestures.json"
+_RECORD_MIN_CONFIDENCE = 0.6  # only learn from confidently-tracked frames
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,32 @@ class PipelineTelemetry:
     mode: str
     paused: bool
     camera_status: str
+
+
+@dataclass(frozen=True)
+class RecordingStatus:
+    """Progress of an in-app custom-gesture recording, for the trainer UI.
+
+    ``state`` is one of ``idle``, ``recording``, ``done``, ``failed`` or ``cancelled``.
+    """
+
+    state: str = "idle"
+    name: str = ""
+    collected: int = 0
+    target: int = 0
+    message: str = ""
+
+    @property
+    def active(self) -> bool:
+        return self.state == "recording"
+
+
+@dataclass
+class _Recording:
+    name: str
+    target: int
+    deadline: float
+    features: list[np.ndarray] = field(default_factory=list)
 
 
 # on_update(source_bgr_image, tracking_result, interpretation, telemetry)
@@ -70,9 +100,11 @@ class GesturePipeline:
         on_camera_status: Callable[[CameraStatus], None] | None = None,
         camera: CameraSource | None = None,
         tracker_factory: Callable[[], HandTracker] | None = None,
+        custom_store: Path | None = None,
     ) -> None:
-        # ``camera`` and ``tracker_factory`` are injection points for tests; production code omits
-        # them and the real webcam/MediaPipe tracker are built from the profile.
+        # ``camera``, ``tracker_factory`` and ``custom_store`` are injection points for tests;
+        # production code omits them and the real webcam/MediaPipe tracker and the per-user
+        # custom-gesture library are used.
         self._settings = settings
         self._profile = settings.profile()
         self._adapter = adapter
@@ -80,8 +112,14 @@ class GesturePipeline:
         self._external_status_cb = on_camera_status
         self._tracker_factory = tracker_factory
 
-        self._custom = CustomGestureClassifier.load(data_dir() / "custom_gestures.json")
+        self._custom_path = custom_store or (data_dir() / CUSTOM_GESTURES_FILENAME)
+        self._custom = CustomGestureClassifier.load(self._custom_path)
         self._interpreter = GestureInterpreter(self._profile, custom=self._custom)
+        # Guards the interpreter's classifier and the recording session, which the GUI thread
+        # edits while the engine thread reads them every frame.
+        self._engine_lock = threading.Lock()
+        self._recording: _Recording | None = None
+        self._recording_status = RecordingStatus()
         self._dispatcher = ActionDispatcher(
             adapter, self._profile, paused=settings.paused
         )
@@ -142,6 +180,92 @@ class GesturePipeline:
         """Non-``None`` if the tracker failed to initialise (e.g. missing model)."""
         return self._init_error
 
+    # -- custom gestures (the in-app trainer) --------------------------------------------------
+    def custom_gestures(self) -> dict[str, int]:
+        """Recorded custom gestures as ``{name: sample_count}``."""
+        clf = self._custom
+        return {name: clf.sample_count(name) for name in clf.names}
+
+    @property
+    def recording_status(self) -> RecordingStatus:
+        return self._recording_status
+
+    def start_recording(self, name: str, *, samples: int = 40, timeout: float = 20.0) -> None:
+        """Begin capturing ``samples`` frames of the current hand pose as custom gesture ``name``.
+
+        Frames are collected on the engine thread as they arrive; poll :attr:`recording_status`
+        for progress. Recording an existing name replaces its samples. While recording, no new
+        gesture actions fire (so posing can't trigger anything), but held ones still release.
+        """
+        if samples < 1:
+            raise ValueError("samples must be >= 1")
+        with self._engine_lock:
+            self._recording = _Recording(name, samples, deadline=time.perf_counter() + timeout)
+            self._recording_status = RecordingStatus(
+                "recording", name, 0, samples, "Hold the pose steady in view…")
+
+    def cancel_recording(self) -> None:
+        with self._engine_lock:
+            if self._recording is not None:
+                name = self._recording.name
+                self._recording = None
+                self._recording_status = RecordingStatus("cancelled", name, message="Cancelled")
+
+    def delete_custom_gesture(self, name: str) -> bool:
+        """Forget a recorded gesture. Returns ``False`` if there was no gesture of that name."""
+        with self._engine_lock:
+            if name not in self._custom.names:
+                return False
+            clf = CustomGestureClassifier.from_dict(self._custom.to_dict())
+            clf.remove(name)
+            self._install_custom(clf)
+        return True
+
+    def _install_custom(self, clf: CustomGestureClassifier) -> None:
+        """Persist ``clf`` and make it live. Caller must hold ``_engine_lock``."""
+        clf.save(self._custom_path)
+        self._custom = clf
+        self._interpreter.set_custom(clf)
+
+    def _feed_recording(self, frame: FrameResult, now: float) -> bool:
+        """Advance an active recording with one tracked frame. Caller must hold ``_engine_lock``.
+
+        Returns ``True`` if a recording consumed this frame (so the caller suppresses actions).
+        """
+        rec = self._recording
+        if rec is None:
+            return False
+        hand = frame.primary
+        if hand is not None and hand.score >= _RECORD_MIN_CONFIDENCE:
+            rec.features.append(landmark_feature(hand))
+        collected = len(rec.features)
+
+        if collected >= rec.target:
+            self._recording = None
+            clf = CustomGestureClassifier.from_dict(self._custom.to_dict())
+            clf.remove(rec.name)  # re-recording replaces, rather than blends, the old samples
+            for feat in rec.features:
+                clf.add_feature(rec.name, feat)
+            try:
+                self._install_custom(clf)
+            except OSError as exc:
+                _log.exception("Could not save custom gesture '%s'", rec.name)
+                self._recording_status = RecordingStatus(
+                    "failed", rec.name, collected, rec.target, f"Couldn't save: {exc}")
+            else:
+                _log.info("Recorded custom gesture '%s' (%d samples)", rec.name, collected)
+                self._recording_status = RecordingStatus(
+                    "done", rec.name, collected, rec.target, "Saved — now bind it to an action")
+        elif now >= rec.deadline:
+            self._recording = None
+            self._recording_status = RecordingStatus(
+                "failed", rec.name, collected, rec.target,
+                "Couldn't see a steady hand — keep it in view and try again")
+        else:
+            self._recording_status = RecordingStatus(
+                "recording", rec.name, collected, rec.target, "Hold the pose steady in view…")
+        return True
+
     def apply_settings(self, settings: AppSettings) -> None:
         """Hot-reload profile settings (thresholds, cursor tuning, bindings)."""
         self._settings = settings
@@ -193,9 +317,12 @@ class GesturePipeline:
                 continue
             inference_ms = (time.perf_counter() - t0) * 1000.0
 
-            interpretation = self._interpreter.update(result)
+            with self._engine_lock:
+                recording = self._feed_recording(result, time.perf_counter())
+                interpretation = self._interpreter.update(result)
             try:
-                self._dispatcher.dispatch(interpretation)
+                self._dispatcher.dispatch(
+                    _releases_only(interpretation) if recording else interpretation)
             except Exception:
                 _log.exception("Dispatch failed")
 
@@ -220,6 +347,21 @@ class GesturePipeline:
         self._camera_status = status
         if self._external_status_cb is not None:
             self._external_status_cb(status)
+
+
+def _releases_only(interp: InterpretationResult) -> InterpretationResult:
+    """A copy of ``interp`` that can only *release* things: no cursor motion, ``ENDED`` events only.
+
+    Used while recording a custom gesture, so the pose being taught never triggers an action,
+    yet a drag that was already in progress still drops its mouse button cleanly.
+    """
+    return InterpretationResult(
+        cursor=None,
+        events=[e for e in interp.events if e.phase is GesturePhase.ENDED],
+        pose=interp.pose,
+        features=interp.features,
+        tracking=interp.tracking,
+    )
 
 
 # --- Headless demo / smoke test ----------------------------------------------------------------

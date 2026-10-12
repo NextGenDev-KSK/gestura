@@ -15,6 +15,7 @@ from .models import (
     Theme,
     TrackingConfig,
     UiConfig,
+    default_bindings,
 )
 from .store import CONFIG_FILENAME, SettingsStore
 
@@ -33,4 +34,5 @@ __all__ = [
     "Theme",
     "TrackingConfig",
     "UiConfig",
+    "default_bindings",
 ]

@@ -99,6 +99,24 @@ def test_middle_and_pinky_pinch_map_to_distinct_clicks() -> None:
     assert adapter.actions[1].args == (MouseButton.MIDDLE,)
 
 
+def test_zoom_action_passes_scale() -> None:
+    adapter = RecordingAdapter()
+    disp = ActionDispatcher(adapter, Profile())
+    disp.dispatch(_result(_ev("zoom", GesturePhase.UPDATED, scale=2.0)))
+    assert adapter.actions[0].name == "zoom"
+    assert adapter.actions[0].args == (2.0,)
+
+
+def test_run_shortcut_sends_the_bound_key_chord() -> None:
+    adapter = RecordingAdapter()
+    profile = Profile(bindings=[
+        GestureBinding(gesture="rock", action="run_shortcut", shortcut=["ctrl", "c"])])
+    disp = ActionDispatcher(adapter, profile)
+    disp.dispatch(_result(_ev("rock", GesturePhase.BEGAN)))
+    assert adapter.actions[0].name == "hotkey"
+    assert adapter.actions[0].args == ("ctrl", "c")
+
+
 def test_unknown_action_is_ignored_gracefully() -> None:
     adapter = RecordingAdapter()
     profile = Profile(bindings=[GestureBinding(gesture="pinch", action="does_not_exist")])

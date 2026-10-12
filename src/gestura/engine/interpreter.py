@@ -18,6 +18,7 @@ reset so the pointer doesn't leap when the hand is re-acquired.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
@@ -32,6 +33,8 @@ from .recognizers import Pose, classify_static_pose
 # --- Tunables not (yet) surfaced in the settings UI -------------------------------------------
 _SCROLL_GAIN = 22.0          # scroll "notches" per unit of normalized vertical hand travel
 _SCROLL_EPSILON = 0.12       # ignore scroll deltas smaller than this (jitter floor)
+_ZOOM_GAIN = 12.0            # zoom "notches" per unit change in the two-hand separation
+_ZOOM_EPSILON = 0.15         # ignore zoom deltas smaller than this (jitter floor)
 _VOLUME_REPEAT = 0.10        # seconds between repeated volume nudges while a thumb pose is held
 _CLICK_COOLDOWN = 0.25       # min seconds between clicks (still allows a deliberate double-click)
 
@@ -49,6 +52,7 @@ class Mode(Enum):
     IDLE = auto()
     DRAG = auto()
     SCROLL = auto()
+    ZOOM = auto()  # two hands, both pinched, moved together/apart
 
 
 @dataclass
@@ -77,6 +81,7 @@ class GestureInterpreter:
         self._middle_closed = False
         self._pinky_closed = False
         self._scroll_ref_y = 0.0
+        self._zoom_ref = 0.0
 
         # Stability gates for shape-based gestures.
         self._fist_gate = StabilityGate(self._thr.stability_time)
@@ -114,9 +119,18 @@ class GestureInterpreter:
             return result
 
         result.tracking = True
+        now = frame.timestamp
+
+        # Two-hand pinch-to-zoom pre-empts everything else. It's fully exclusive and, being a
+        # *two-hand* gesture, can never be confused with any of the single-hand signs.
+        if len(frame.hands) >= 2:
+            if self._handle_zoom(frame, result, now):
+                return result
+        elif self._mode is Mode.ZOOM:
+            self._end_zoom(result, now)
+
         f = extract(hand)
         result.features = f
-        now = frame.timestamp
 
         # Cursor tracks every frame regardless of mode (so you can drag while moving).
         result.cursor = self.cursor.update(f.anchor, now)
@@ -183,6 +197,47 @@ class GestureInterpreter:
                 GestureEvent("two_finger_scroll", GesturePhase.ENDED, conf, timestamp=now)
             )
         return False
+
+    # -- zoom (two-hand pinch-spread) ----------------------------------------------------------
+    def _handle_zoom(self, frame: FrameResult, result: InterpretationResult, now: float) -> bool:
+        """Engage zoom when both hands are pinched; emit scale deltas as they move apart/together.
+
+        Returns ``True`` while zoom is active (so the caller skips all single-hand handling).
+        """
+        h1, h2 = frame.hands[0], frame.hands[1]
+        if h1.score < self._thr.min_confidence or h2.score < self._thr.min_confidence:
+            if self._mode is Mode.ZOOM:
+                self._end_zoom(result, now)
+            return False
+
+        f1, f2 = extract(h1), extract(h2)
+        # Hysteresis: engage below pinch_on, stay engaged until clearly released above pinch_off.
+        limit = self._thr.pinch_off if self._mode is Mode.ZOOM else self._thr.pinch_on
+        both_pinched = f1.pinch_index_norm < limit and f2.pinch_index_norm < limit
+        if not both_pinched:
+            if self._mode is Mode.ZOOM:
+                self._end_zoom(result, now)
+            return False
+
+        separation = math.hypot(f1.anchor[0] - f2.anchor[0], f1.anchor[1] - f2.anchor[1])
+        conf = min(f1.score, f2.score)
+        if self._mode is not Mode.ZOOM:
+            self._mode = Mode.ZOOM
+            self._zoom_ref = separation
+            self.cursor.reset()  # avoid a pointer jump when we later return to one hand
+            result.events.append(GestureEvent("zoom", GesturePhase.BEGAN, conf, timestamp=now))
+        else:
+            delta = (separation - self._zoom_ref) * _ZOOM_GAIN
+            self._zoom_ref = separation
+            if abs(delta) >= _ZOOM_EPSILON:
+                result.events.append(GestureEvent(
+                    "zoom", GesturePhase.UPDATED, conf, payload={"scale": delta}, timestamp=now))
+        result.cursor = None  # don't move the pointer while zooming
+        return True
+
+    def _end_zoom(self, result: InterpretationResult, now: float) -> None:
+        self._mode = Mode.IDLE
+        result.events.append(GestureEvent("zoom", GesturePhase.ENDED, 0.0, timestamp=now))
 
     # -- pinch / left click --------------------------------------------------------------------
     def _handle_pinch(self, f: FeatureSet, conf, result, now) -> None:
@@ -294,6 +349,8 @@ class GestureInterpreter:
             result.events.append(
                 GestureEvent("two_finger_scroll", GesturePhase.ENDED, 0.0, timestamp=now)
             )
+        elif self._mode is Mode.ZOOM:
+            result.events.append(GestureEvent("zoom", GesturePhase.ENDED, 0.0, timestamp=now))
         self._mode = Mode.IDLE
         self._pinch_closed = False
         self._middle_closed = False
@@ -313,3 +370,15 @@ class GestureInterpreter:
         self._profile = profile
         self._thr = profile.thresholds
         self.cursor.apply_config(profile.cursor)
+
+    def set_custom(self, custom: CustomGestureClassifier | None) -> None:
+        """Swap in a new custom-gesture classifier (after the user records or deletes one).
+
+        Latches are reset so a deleted gesture can't stay "active". Not thread-safe on its own:
+        call it from the thread that runs :meth:`update`, or under the same lock (the pipeline
+        does the latter).
+        """
+        self._custom = custom
+        self._custom_candidate = None
+        self._custom_active = None
+        self._custom_gate.reset()

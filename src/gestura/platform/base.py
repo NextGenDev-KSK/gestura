@@ -40,6 +40,42 @@ class WindowAction(Enum):
     SHOW_DESKTOP = "show_desktop"
 
 
+# --- Keyboard shortcuts -----------------------------------------------------------------------
+#: Named keys every adapter's :meth:`OSAdapter.hotkey` must accept (lower-case). Single letters
+#: ``a``-``z`` and digits ``0``-``9`` are accepted in addition to these.
+SHORTCUT_KEYS: frozenset[str] = frozenset({
+    "ctrl", "control", "alt", "shift", "win", "super", "meta", "cmd",
+    "tab", "enter", "return", "esc", "escape", "space", "backspace", "delete", "del", "insert",
+    "home", "end", "pageup", "pagedown", "left", "up", "right", "down", "printscreen", "prtscn",
+    "volume_up", "volume_down", "volume_mute",
+    "media_next", "media_prev", "media_stop", "media_play_pause",
+    *(f"f{i}" for i in range(1, 13)),
+})
+
+_MAX_CHORD = 4  # modifiers + key; anything longer is almost certainly a typo
+
+
+def parse_shortcut(text: str) -> list[str]:
+    """Parse a human key chord such as ``"Ctrl + Shift + S"`` into ``["ctrl", "shift", "s"]``.
+
+    Raises:
+        ValueError: with a user-presentable message if any key is unknown, a key repeats, or the
+            chord is empty/too long. Validating here (when the user types it) means a bad binding
+            is rejected in the editor instead of failing silently each time the gesture fires.
+    """
+    keys = [part.strip().lower() for part in text.split("+")]
+    if not text.strip() or any(not k for k in keys):
+        raise ValueError("Type keys joined with '+', e.g. ctrl+shift+s")
+    for key in keys:
+        if key not in SHORTCUT_KEYS and not (len(key) == 1 and key.isascii() and key.isalnum()):
+            raise ValueError(f"Unknown key '{key}'")
+    if len(set(keys)) != len(keys):
+        raise ValueError("A key is repeated")
+    if len(keys) > _MAX_CHORD:
+        raise ValueError(f"Use at most {_MAX_CHORD} keys")
+    return keys
+
+
 class OSAdapter(ABC):
     """Abstract OS control surface. Concrete adapters must implement every method."""
 
@@ -66,6 +102,10 @@ class OSAdapter(ABC):
     @abstractmethod
     def scroll(self, dy: float, dx: float = 0.0) -> None:
         """Scroll by wheel notches; positive ``dy`` scrolls up, positive ``dx`` scrolls right."""
+
+    @abstractmethod
+    def zoom(self, delta: float) -> None:
+        """Zoom by ``delta`` steps (Ctrl + wheel); positive zooms in, negative zooms out."""
 
     @abstractmethod
     def adjust_volume(self, delta_percent: float) -> None:
@@ -147,6 +187,9 @@ class RecordingAdapter(OSAdapter):
 
     def scroll(self, dy: float, dx: float = 0.0) -> None:
         self._record("scroll", dy, dx)
+
+    def zoom(self, delta: float) -> None:
+        self._record("zoom", delta)
 
     def adjust_volume(self, delta_percent: float) -> None:
         self._record("adjust_volume", delta_percent)

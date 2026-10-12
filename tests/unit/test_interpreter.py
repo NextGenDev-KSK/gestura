@@ -175,6 +175,42 @@ def test_low_confidence_hand_is_ignored(hand_factory, frame_factory) -> None:
     assert result.events == []
 
 
+def test_two_hand_pinch_zooms(hand_factory, multi_frame_factory, shift) -> None:
+    interp = GestureInterpreter(Profile())
+    a = hand_factory("pinch")
+    b = shift(hand_factory("pinch"), dx=0.35)  # second hand to the right
+    r0 = interp.update(multi_frame_factory([a, b], timestamp=0.0))
+    assert interp.mode is Mode.ZOOM
+    assert "zoom" in _names(r0.events, GesturePhase.BEGAN)
+
+    # Spread the hands apart -> zoom in (positive scale); cursor suppressed while zooming.
+    b2 = shift(hand_factory("pinch"), dx=0.55)
+    r1 = interp.update(multi_frame_factory([a, b2], timestamp=0.05))
+    zooms = [e for e in r1.events if e.name == "zoom" and e.phase is GesturePhase.UPDATED]
+    assert zooms and zooms[0].payload["scale"] > 0
+    assert r1.cursor is None
+
+
+def test_zoom_needs_both_hands_pinched(hand_factory, multi_frame_factory, shift) -> None:
+    interp = GestureInterpreter(Profile())
+    # Two open hands (not pinched) must NOT start a zoom.
+    a = hand_factory("open")
+    b = shift(hand_factory("open"), dx=0.35)
+    interp.update(multi_frame_factory([a, b], timestamp=0.0))
+    assert interp.mode is not Mode.ZOOM
+
+
+def test_zoom_ends_when_a_hand_leaves(hand_factory, multi_frame_factory, frame_factory, shift):
+    interp = GestureInterpreter(Profile())
+    a = hand_factory("pinch")
+    b = shift(hand_factory("pinch"), dx=0.35)
+    interp.update(multi_frame_factory([a, b], timestamp=0.0))
+    assert interp.mode is Mode.ZOOM
+    r = interp.update(frame_factory(hand_factory("open"), timestamp=0.05))  # back to one hand
+    assert interp.mode is Mode.IDLE
+    assert "zoom" in _names(r.events, GesturePhase.ENDED)
+
+
 def test_scroll_and_click_are_mutually_exclusive(hand_factory, frame_factory) -> None:
     """While scrolling, a stray pinch-distance must not produce clicks."""
     interp = GestureInterpreter(Profile())

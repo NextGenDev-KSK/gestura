@@ -9,7 +9,7 @@ import numpy as np
 from gestura.config.models import AppSettings
 from gestura.core.types import FrameResult
 from gestura.engine.pipeline import GesturePipeline
-from gestura.platform.base import RecordingAdapter
+from gestura.platform.base import MouseButton, RecordingAdapter
 from gestura.vision.camera import CameraFrame, CameraStatus
 
 
@@ -100,3 +100,124 @@ def test_pipeline_reports_model_error_without_crashing() -> None:
         assert "no model" in pipeline.init_error
     finally:
         pipeline.stop()
+
+
+# --- In-app gesture trainer ---------------------------------------------------------------------
+def _trainer_pipeline(tmp_path, adapter=None) -> GesturePipeline:
+    frames = [CameraFrame(np.zeros((4, 4, 3), np.uint8), index=1, timestamp=0.0)]
+    return GesturePipeline(
+        AppSettings(), adapter or RecordingAdapter(),
+        camera=_FakeCamera(frames), tracker_factory=lambda: _FakeTracker({}),
+        custom_store=tmp_path / "custom_gestures.json",
+    )
+
+
+def test_recording_saves_a_gesture_that_is_then_recognised(tmp_path, hand_factory,
+                                                           frame_factory) -> None:
+    from gestura.engine.custom import CustomGestureClassifier
+
+    pipe = _trainer_pipeline(tmp_path)
+    pipe.start_recording("horns", samples=5, timeout=10.0)
+    assert pipe.recording_status.active
+
+    rock = hand_factory("rock")
+    for i in range(5):
+        assert pipe._feed_recording(frame_factory(rock, timestamp=i * 0.03), now=0.0)
+    status = pipe.recording_status
+    assert status.state == "done" and status.collected == 5
+    assert pipe.custom_gestures() == {"horns": 5}
+
+    # Persisted to the injected store...
+    saved = CustomGestureClassifier.load(tmp_path / "custom_gestures.json")
+    assert saved.sample_count("horns") == 5
+    # ...and live in the interpreter without a restart.
+    events = []
+    for i in range(12):
+        events += pipe._interpreter.update(frame_factory(rock, timestamp=1.0 + i * 0.05)).events
+    assert any(e.name == "horns" for e in events)
+
+
+def test_recording_ignores_frames_without_a_confident_hand(tmp_path, hand_factory,
+                                                          frame_factory) -> None:
+    pipe = _trainer_pipeline(tmp_path)
+    pipe.start_recording("wave", samples=3, timeout=10.0)
+    pipe._feed_recording(frame_factory(None, timestamp=0.0), now=0.0)
+    pipe._feed_recording(frame_factory(hand_factory("open", score=0.2), timestamp=0.1), now=0.0)
+    assert pipe.recording_status.collected == 0
+    assert pipe.recording_status.active
+
+
+def test_recording_times_out_without_saving(tmp_path, hand_factory, frame_factory) -> None:
+    pipe = _trainer_pipeline(tmp_path)
+    pipe.start_recording("wave", samples=40, timeout=5.0)
+    deadline = time.perf_counter() + 5.0
+    pipe._feed_recording(frame_factory(hand_factory("open"), timestamp=0.0), now=deadline + 1)
+    assert pipe.recording_status.state == "failed"
+    assert pipe.custom_gestures() == {}
+    assert not (tmp_path / "custom_gestures.json").exists()
+    assert not pipe._feed_recording(frame_factory(None, timestamp=0.1), now=0.0)  # session over
+
+
+def test_cancel_and_delete_custom_gestures(tmp_path, hand_factory, frame_factory) -> None:
+    pipe = _trainer_pipeline(tmp_path)
+    pipe.start_recording("wave", samples=2)
+    pipe.cancel_recording()
+    assert pipe.recording_status.state == "cancelled"
+    assert not pipe._feed_recording(frame_factory(hand_factory("open"), timestamp=0.0), now=0.0)
+
+    pipe.start_recording("wave", samples=2)
+    for i in range(2):
+        pipe._feed_recording(frame_factory(hand_factory("open"), timestamp=i * 0.03), now=0.0)
+    assert pipe.custom_gestures() == {"wave": 2}
+    assert pipe.delete_custom_gesture("wave")
+    assert pipe.custom_gestures() == {}
+    assert not pipe.delete_custom_gesture("wave")
+
+
+def test_rerecording_replaces_old_samples(tmp_path, hand_factory, frame_factory) -> None:
+    pipe = _trainer_pipeline(tmp_path)
+    for samples in (4, 2):
+        pipe.start_recording("wave", samples=samples)
+        for i in range(samples):
+            pipe._feed_recording(frame_factory(hand_factory("open"), timestamp=i * 0.03), now=0.0)
+    assert pipe.custom_gestures() == {"wave": 2}
+
+
+def test_while_recording_actions_are_suppressed_but_drags_still_release(
+        tmp_path, hand_factory, frame_factory) -> None:
+    """Posing for the trainer must never click/drag — yet a drag already held must drop."""
+    adapter = RecordingAdapter()
+    hands = [hand_factory("fist")] * 6 + [hand_factory("pinch")] * 4
+    script = {i + 1: frame_factory(h, timestamp=i * 0.05, index=i + 1) for i, h in enumerate(hands)}
+    frames = [CameraFrame(np.zeros((4, 4, 3), np.uint8), index=i, timestamp=0.0)
+              for i in script]
+
+    class _GatedCamera(_FakeCamera):
+        """Holds at the last fist frame until released, so the test can start recording there."""
+
+        def __init__(self, frames) -> None:
+            super().__init__(frames)
+            self.hold_at = 6
+
+        def latest(self):
+            if self._i >= self.hold_at:
+                return self._frames[self._i - 1]
+            return super().latest()
+
+    camera = _GatedCamera(frames)
+    pipe = GesturePipeline(
+        AppSettings(), adapter, camera=camera, tracker_factory=lambda: _FakeTracker(script),
+        custom_store=tmp_path / "custom_gestures.json",
+    )
+    pipe.start()
+    try:
+        assert _wait_for(lambda: MouseButton.LEFT in adapter.buttons_down), "fist should grab"
+        pipe.start_recording("pose", samples=100, timeout=30.0)
+        moves_before = adapter.names().count("move_cursor")
+        camera.hold_at = len(frames)  # release the pinch frames
+        assert _wait_for(lambda: MouseButton.LEFT not in adapter.buttons_down), "drag must drop"
+        assert _wait_for(lambda: pipe.recording_status.collected >= 4)
+    finally:
+        pipe.stop()
+    assert "click" not in adapter.names()                     # the pinch did not click
+    assert adapter.names().count("move_cursor") == moves_before  # and the cursor stayed put

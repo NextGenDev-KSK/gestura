@@ -131,7 +131,10 @@ def _resolve_vk(key: str) -> int:
     key = key.lower()
     if key in _VK:
         return _VK[key]
-    if len(key) == 1:
+    # Virtual-key codes equal the ASCII code only for A-Z and 0-9. Punctuation does NOT map this
+    # way (e.g. ord(',') == 0x2C is VK_SNAPSHOT / PrintScreen), so it's rejected rather than
+    # silently pressing the wrong key.
+    if len(key) == 1 and key.isascii() and key.isalnum():
         return ord(key.upper())
     raise KeyError(f"unknown key {key!r}")
 
@@ -191,6 +194,20 @@ class WindowsAdapter(OSAdapter):
             inputs.append(_mouse_input(_MOUSEEVENTF_HWHEEL, data=int(dx * _WHEEL_DELTA)))
         if inputs:
             _send(*inputs)
+
+    def zoom(self, delta: float) -> None:
+        # Ctrl + mouse wheel is the near-universal zoom (browsers, editors, image viewers, maps).
+        steps = int(delta * _WHEEL_DELTA)
+        if steps == 0:
+            return
+        ctrl = _resolve_vk("ctrl")
+        # One batched SendInput call so the Ctrl press, wheel and release can't be interleaved
+        # with real input (which could otherwise leave Ctrl logically held down).
+        _send(
+            _key_input(ctrl, up=False, extended=False),
+            _mouse_input(_MOUSEEVENTF_WHEEL, data=steps),
+            _key_input(ctrl, up=True, extended=False),
+        )
 
     # -- keyboard ------------------------------------------------------------------------------
     def _tap(self, vk: int) -> None:

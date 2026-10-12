@@ -12,10 +12,10 @@ maps ``BEGAN``/``ENDED`` to button down/up; a repeating one (scroll, volume) act
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
-from ..core.types import GestureEvent, GesturePhase
+from ..core.types import GestureEvent, GestureKind, GesturePhase
 from ..platform.base import MediaAction, MouseButton, OSAdapter, WindowAction
 
 
@@ -33,9 +33,19 @@ class ActionContext:
     event: GestureEvent
     params: dict[str, float]
     control: EngineControl | None
+    shortcut: list[str] = field(default_factory=list)  # key chord for the run_shortcut action
 
 
 Handler = Callable[[ActionContext], None]
+
+
+# Which gesture kinds each style of action can be driven by (see GestureKind).
+#: Fires once on ``BEGAN`` — any gesture that begins works, held or tapped.
+MOMENTARY: frozenset[GestureKind] = frozenset({GestureKind.TAP, GestureKind.HOLD})
+#: Needs ``BEGAN`` and a *later* ``ENDED`` (press, then release) — only a held gesture.
+HELD: frozenset[GestureKind] = frozenset({GestureKind.HOLD})
+#: Acts on each repeated ``UPDATED`` while a pose is held.
+REPEATING: frozenset[GestureKind] = frozenset({GestureKind.REPEAT})
 
 
 @dataclass(frozen=True)
@@ -45,6 +55,11 @@ class ActionSpec:
     category: str
     description: str
     handler: Handler
+    accepts: frozenset[GestureKind] = MOMENTARY
+
+    def accepts_kind(self, kind: GestureKind) -> bool:
+        """Whether a gesture of ``kind`` produces the events this action needs to work."""
+        return kind in self.accepts
 
 
 # --- Handlers ---------------------------------------------------------------------------------
@@ -85,6 +100,18 @@ def _scroll(ctx: ActionContext) -> None:
         dy = ctx.event.payload.get("dy", 0.0) * ctx.params.get("speed", 1.0)
         dx = ctx.event.payload.get("dx", 0.0) * ctx.params.get("speed", 1.0)
         ctx.adapter.scroll(dy, dx)
+
+
+def _zoom(ctx: ActionContext) -> None:
+    if ctx.event.phase is GesturePhase.UPDATED:
+        scale = ctx.event.payload.get("scale", 0.0) * ctx.params.get("speed", 1.0)
+        ctx.adapter.zoom(scale)
+
+
+def _run_shortcut(ctx: ActionContext) -> None:
+    # Bind any gesture to an arbitrary key chord, e.g. shortcut=["ctrl","c"] or ["alt","f4"].
+    if _on_began(ctx) and ctx.shortcut:
+        ctx.adapter.hotkey(*ctx.shortcut)
 
 
 def _volume_up(ctx: ActionContext) -> None:
@@ -137,14 +164,18 @@ _SPECS: tuple[ActionSpec, ...] = (
     ActionSpec("right_click", "Right click", "Mouse", "Context-menu click", _right_click),
     ActionSpec("middle_click", "Middle click", "Mouse", "Middle-button click", _middle_click),
     ActionSpec("double_click", "Double click", "Mouse", "Double primary click", _double_click),
-    ActionSpec("drag", "Drag", "Mouse", "Hold to drag, release to drop", _drag),
-    ActionSpec("scroll", "Scroll", "Mouse", "Scroll vertically/horizontally", _scroll),
-    ActionSpec("volume_up", "Volume up", "System", "Raise master volume", _volume_up),
-    ActionSpec("volume_down", "Volume down", "System", "Lower master volume", _volume_down),
+    ActionSpec("drag", "Drag", "Mouse", "Hold to drag, release to drop", _drag, HELD),
+    ActionSpec("scroll", "Scroll", "Mouse", "Scroll vertically/horizontally", _scroll,
+               frozenset({GestureKind.SCROLL})),
+    ActionSpec("zoom", "Zoom", "Mouse", "Zoom in/out (Ctrl + wheel)", _zoom,
+               frozenset({GestureKind.ZOOM})),
+    ActionSpec("volume_up", "Volume up", "System", "Raise master volume", _volume_up, REPEATING),
+    ActionSpec("volume_down", "Volume down", "System", "Lower master volume", _volume_down,
+               REPEATING),
     ActionSpec("brightness_up", "Brightness up", "System", "Raise display brightness",
-               _brightness_up),
+               _brightness_up, REPEATING),
     ActionSpec("brightness_down", "Brightness down", "System", "Lower display brightness",
-               _brightness_down),
+               _brightness_down, REPEATING),
     ActionSpec("screenshot", "Screenshot", "System", "Capture the screen to a file", _screenshot),
     ActionSpec("pause_toggle", "Pause / resume", "App", "Toggle gesture control", _pause_toggle),
     ActionSpec("media_play_pause", "Play / pause", "Media", "Toggle media playback",
@@ -166,6 +197,8 @@ _SPECS: tuple[ActionSpec, ...] = (
                _window(WindowAction.SWITCH)),
     ActionSpec("show_desktop", "Show desktop", "Window", "Minimize everything",
                _window(WindowAction.SHOW_DESKTOP)),
+    ActionSpec("run_shortcut", "Keyboard shortcut", "System",
+               "Send a custom key combo (set the keys on the binding)", _run_shortcut),
 )
 
 ACTIONS: dict[str, ActionSpec] = {spec.id: spec for spec in _SPECS}
@@ -179,3 +212,8 @@ def get_action(action_id: str) -> ActionSpec | None:
 def all_actions() -> tuple[ActionSpec, ...]:
     """Every registered action (for the settings UI)."""
     return _SPECS
+
+
+def actions_for(kind: GestureKind) -> tuple[ActionSpec, ...]:
+    """The actions a gesture of ``kind`` can usefully be bound to, in catalogue order."""
+    return tuple(spec for spec in _SPECS if spec.accepts_kind(kind))

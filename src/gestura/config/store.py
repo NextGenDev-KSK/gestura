@@ -16,23 +16,61 @@ import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError
 
 from ..util.logging import get_logger
 from ..util.paths import config_dir
-from .models import SCHEMA_VERSION, AppSettings
+from .models import DEFAULT_BINDINGS, SCHEMA_VERSION, AppSettings
 
 _log = get_logger("gestura.config")
 
 CONFIG_FILENAME = "settings.json"
 
+#: Gesture ids that v1 builds emitted but the engine no longer produces; a binding to one of these
+#: can never fire again, so the v1 -> v2 migration drops it.
+_RETIRED_V1_GESTURES = frozenset({"open_palm_hold"})
+
+
+def _migrate_v1_to_v2(raw: dict[str, Any]) -> dict[str, Any]:
+    """v1 -> v2: adopt the new gesture vocabulary and two-hand tracking without losing edits.
+
+    v1 installs saved the *old* default bindings and ``max_hands = 1``, so new gestures (pinky
+    pinch, the thumb directions, the one-shot signs, two-hand zoom) never reached them. For every
+    profile this:
+
+    * drops bindings to retired gestures (``open_palm_hold``);
+    * adds each current default binding whose gesture isn't bound yet — existing bindings,
+      including ones the user changed, are kept exactly as they are;
+    * raises ``tracking.max_hands`` from the old default of 1 to 2 (it wasn't user-editable in
+      v1), which the two-hand zoom gesture needs.
+    """
+    for profile in (raw.get("profiles") or {}).values():
+        if not isinstance(profile, dict):
+            continue
+        bindings = [
+            b for b in profile.get("bindings", [])
+            if not (isinstance(b, dict) and b.get("gesture") in _RETIRED_V1_GESTURES)
+        ]
+        bound = {b.get("gesture") for b in bindings if isinstance(b, dict)}
+        bindings += [
+            d.model_dump(mode="json") for d in DEFAULT_BINDINGS if d.gesture not in bound
+        ]
+        profile["bindings"] = bindings
+
+        tracking = profile.get("tracking")
+        if isinstance(tracking, dict) and tracking.get("max_hands", 1) == 1:
+            tracking["max_hands"] = 2
+    return raw
+
+
 # Ordered migrations: {from_version: fn(raw_dict) -> raw_dict at from_version+1}.
 # Add an entry here whenever SCHEMA_VERSION is bumped.
-_MIGRATIONS: dict[int, Callable[[dict], dict]] = {}
+_MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _migrate_v1_to_v2}
 
 
-def _migrate(raw: dict) -> dict:
+def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
     """Upgrade a raw settings dict to the current schema, applying steps in order."""
     version = int(raw.get("schema_version", SCHEMA_VERSION))
     while version < SCHEMA_VERSION:
@@ -73,11 +111,21 @@ class SettingsStore:
             return AppSettings()
 
         try:
+            on_disk_version = int(raw.get("schema_version", SCHEMA_VERSION))
             raw = _migrate(raw)
-            return AppSettings.model_validate(raw)
-        except ValidationError as exc:
-            self._quarantine(reason=f"schema validation failed: {exc.error_count()} error(s)")
+            settings = AppSettings.model_validate(raw)
+        except (ValidationError, TypeError, ValueError) as exc:
+            count = exc.error_count() if isinstance(exc, ValidationError) else 1
+            self._quarantine(reason=f"schema validation failed: {count} error(s)")
             return AppSettings()
+
+        if on_disk_version < SCHEMA_VERSION:
+            # Persist the upgrade so it runs exactly once (and the file matches what's in memory).
+            try:
+                self.save(settings)
+            except OSError:  # pragma: no cover - read-only config dir; keep running in memory
+                _log.exception("Could not persist migrated settings")
+        return settings
 
     # -- save ----------------------------------------------------------------------------------
     def save(self, settings: AppSettings) -> None:

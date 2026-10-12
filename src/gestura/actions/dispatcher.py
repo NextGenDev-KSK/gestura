@@ -9,13 +9,18 @@ hold" gesture, or the UI, can freeze all input while the engine keeps running).
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from ..config.models import GestureBinding, Profile
 from ..core.types import GestureEvent
-from ..engine.interpreter import InterpretationResult
 from ..platform.base import OSAdapter
 from ..util.logging import get_logger
 from .registry import ActionContext, EngineControl, get_action
+
+if TYPE_CHECKING:
+    # Annotation-only: importing the engine at runtime would form a cycle
+    # (engine.pipeline -> actions.dispatcher -> engine), making import order matter.
+    from ..engine.interpreter import InterpretationResult
 
 _log = get_logger("gestura.actions")
 
@@ -84,7 +89,8 @@ class ActionDispatcher(EngineControl):
                 _log.warning("Binding '%s' -> unknown action '%s'", event.name, binding.action)
             return
 
-        ctx = ActionContext(self._adapter, event, binding.params, control=self)
+        ctx = ActionContext(self._adapter, event, binding.params, control=self,
+                            shortcut=binding.shortcut)
         try:
             spec.handler(ctx)
         except Exception:
