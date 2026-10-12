@@ -14,6 +14,7 @@ public sub-packages rather than reaching into private modules::
 
 from __future__ import annotations
 
-__all__ = ["__version__"]
+__all__ = ["__author__", "__version__"]
 
 __version__ = "0.1.0"
+__author__ = "Krithik S"

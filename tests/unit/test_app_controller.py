@@ -210,3 +210,11 @@ def test_recording_needs_a_streaming_camera(editor) -> None:
     ctrl._camera_status = "streaming"
     assert ctrl.startRecording("wave") == ""
     assert ctrl._pipeline.recording_status.active
+
+
+def test_about_footer_credits_the_developer(editor) -> None:
+    import gestura
+
+    ctrl, _ = editor
+    assert ctrl.appAuthor == "Krithik S"
+    assert ctrl.appVersion == gestura.__version__

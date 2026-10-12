@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from PySide6.QtCore import Property, QObject, QPointF, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
 
+from .. import __author__, __version__
 from ..actions.registry import actions_for, get_action
 from ..config.models import AppSettings, GestureBinding, Theme, default_bindings
 from ..config.store import SettingsStore
@@ -232,6 +233,14 @@ class AppController(QObject):
     @Property(str, notify=settingsChanged)
     def activeProfile(self) -> str:
         return self._settings.active_profile
+
+    @Property(str, constant=True)
+    def appVersion(self) -> str:
+        return __version__
+
+    @Property(str, constant=True)
+    def appAuthor(self) -> str:
+        return __author__
 
     @Property(list, notify=gesturesChanged)
     def gestureRows(self) -> list[dict[str, Any]]:

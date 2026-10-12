@@ -7,7 +7,7 @@
 
 #define AppName "Gestura"
 #define AppVersion "0.1.0"
-#define AppPublisher "Gestura contributors"
+#define AppPublisher "Krithik S"
 #define AppExeName "Gestura.exe"
 
 [Setup]

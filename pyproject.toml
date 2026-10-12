@@ -9,7 +9,7 @@ description = "Offline, AI-powered hand-gesture control for the desktop."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = { text = "Apache-2.0" }
-authors = [{ name = "Gestura contributors" }]
+authors = [{ name = "Krithik S" }]
 keywords = ["gesture", "hand-tracking", "mediapipe", "accessibility", "computer-vision"]
 classifiers = [
     "Development Status :: 3 - Alpha",

@@ -103,6 +103,21 @@ Item {
                                     path: "ui.show_overlay" }
                     SettingToggle { filter: search.text; label: "Mirror camera (selfie view)"
                                     path: "profile.camera.mirror" }
+
+                    // About footer — the last thing in the panel.
+                    Column {
+                        visible: search.text === ""
+                        width: parent.width
+                        topPadding: 22
+                        bottomPadding: 12
+                        spacing: 4
+                        Rectangle { width: parent.width; height: 1; color: Theme.stroke }
+                        Item { width: 1; height: 8 }
+                        Text { text: "Gestura " + controller.appVersion; color: Theme.subtext
+                               font.pixelSize: Theme.fontS }
+                        Text { text: "Developed by " + controller.appAuthor; color: Theme.text
+                               font.pixelSize: Theme.fontS; font.weight: Font.DemiBold }
+                    }
                 }
             }
         }
