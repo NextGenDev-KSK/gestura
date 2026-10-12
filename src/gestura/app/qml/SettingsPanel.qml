@@ -21,11 +21,15 @@ Item {
 
     GlassPanel {
         id: sheet
+        sheet: true
         strong: true
         width: Math.min(400, parent.width * 0.5)
         height: parent.height
         x: panel.open ? parent.width - width : parent.width
         Behavior on x { NumberAnimation { id: slideAnim; duration: 220; easing.type: Easing.OutCubic } }
+
+        // Clicks on the sheet itself must not fall through to the scrim (which closes the panel).
+        MouseArea { anchors.fill: parent }
 
         Column {
             anchors.fill: parent
@@ -104,14 +108,20 @@ Item {
         }
     }
 
-    // Inline group header
-    component SettingGroup: Text {
+    // Inline group header. The label sits inside an Item so the collapsing height doesn't feed
+    // back into the Text's own implicitHeight (which was a height binding loop).
+    component SettingGroup: Item {
         property string title: ""
         property string filter: ""
         visible: filter === ""
-        height: visible ? implicitHeight + 8 : 0
-        text: title.toUpperCase(); color: Theme.accent2
-        font.pixelSize: Theme.fontS; font.letterSpacing: 1.4; topPadding: 8
+        width: parent ? parent.width : 300
+        height: visible ? groupLabel.implicitHeight + 16 : 0
+        Text {
+            id: groupLabel
+            y: 16
+            text: parent.title.toUpperCase(); color: Theme.accent2
+            font.pixelSize: Theme.fontS; font.letterSpacing: 1.4
+        }
     }
 
     // Inline boolean toggle bound to a settings path

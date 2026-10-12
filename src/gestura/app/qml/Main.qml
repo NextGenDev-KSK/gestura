@@ -89,7 +89,8 @@ ApplicationWindow {
                        font.pixelSize: Theme.fontS; Layout.alignment: Qt.AlignVCenter }
                 Item { Layout.fillWidth: true }
 
-                WinButton { glyph: "⚙"; onClicked: settingsPanel.open = true }
+                WinButton { glyph: "✋"; tip: "Gestures"; onClicked: gesturesPanel.open = true }
+                WinButton { glyph: "⚙"; tip: "Settings"; onClicked: settingsPanel.open = true }
                 WinButton { glyph: "🌓"; onClicked: controller.setTheme(Theme.dark ? "light" : "dark") }
                 WinButton { glyph: "—"; onClicked: win.showMinimized() }
                 WinButton { glyph: "✕"; danger: true; onClicked: Qt.quit() }
@@ -114,13 +115,15 @@ ApplicationWindow {
 
         // Main content
         RowLayout {
+            id: mainRow
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 12
 
-            // Camera card
+            // Camera card — 56% of the row. Sized from the window rather than the row's own width:
+            // binding a child to the layout it's being laid out by made the layout recurse.
             GlassPanel {
-                Layout.preferredWidth: parent.width * 0.56
+                Layout.preferredWidth: (win.width - 28 - mainRow.spacing) * 0.56
                 Layout.fillHeight: true
                 clip: true
 
@@ -176,7 +179,7 @@ ApplicationWindow {
                     Text {
                         id: poseText
                         anchors.centerIn: parent
-                        text: controller.paused ? "PAUSED" : controller.pose.replace("_", " ")
+                        text: controller.paused ? "PAUSED" : controller.pose.replace(/_/g, " ")
                         color: "#06121a"; font.pixelSize: Theme.fontM; font.weight: Font.DemiBold
                         font.capitalization: Font.Capitalize
                     }
@@ -259,7 +262,7 @@ ApplicationWindow {
                     }
                 }
 
-                // Gesture cheat sheet
+                // Gesture cheat sheet — the live, active bindings (edit them in the Gestures panel).
                 GlassPanel {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -267,36 +270,41 @@ ApplicationWindow {
                         anchors.fill: parent
                         anchors.margins: Theme.pad
                         spacing: 8
-                        Text { text: "GESTURES"; color: Theme.subtext
-                               font.pixelSize: Theme.fontS; font.letterSpacing: 1.2 }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "GESTURES"; color: Theme.subtext
+                                   font.pixelSize: Theme.fontS; font.letterSpacing: 1.2
+                                   Layout.fillWidth: true }
+                            Text {
+                                text: "Edit ›"; color: Theme.accent; font.pixelSize: Theme.fontS
+                                MouseArea { anchors.fill: parent; anchors.margins: -6
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: gesturesPanel.open = true }
+                            }
+                        }
                         ListView {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
                             spacing: 7
                             boundsBehavior: Flickable.StopAtBounds
-                            model: [
-                                { g: "👌  Pinch (index)", a: "Left click" },
-                                { g: "🤏  Middle pinch", a: "Right click" },
-                                { g: "🤞  Pinky pinch", a: "Middle click" },
-                                { g: "✊  Fist", a: "Drag / drop" },
-                                { g: "✌️  Two fingers", a: "Scroll" },
-                                { g: "🤘  Rock (index+pinky)", a: "Switch window" },
-                                { g: "3️⃣  Three fingers", a: "Screenshot" },
-                                { g: "🤙  Pinky", a: "Play / pause" },
-                                { g: "👍  Thumb up", a: "Volume up" },
-                                { g: "👎  Thumb down", a: "Volume down" },
-                                { g: "👈  Thumb left", a: "Previous track" },
-                                { g: "👉  Thumb right", a: "Next track" }
-                            ]
+                            model: controller.gestureRows.filter(r => r.action !== "" && r.enabled)
                             delegate: Row {
                                 width: ListView.view.width
                                 spacing: 8
-                                Text { text: modelData.g; color: Theme.text
-                                       font.pixelSize: Theme.fontM; width: parent.width * 0.55
-                                       elide: Text.ElideRight }
-                                Text { text: modelData.a; color: Theme.subtext
-                                       font.pixelSize: Theme.fontM }
+                                Text { text: modelData.icon + "  " + modelData.label
+                                       color: Theme.text; font.pixelSize: Theme.fontM
+                                       width: parent.width * 0.55; elide: Text.ElideRight }
+                                Text { text: modelData.action === "run_shortcut" && modelData.shortcut
+                                             ? modelData.shortcut : modelData.actionLabel
+                                       color: Theme.subtext; font.pixelSize: Theme.fontM
+                                       width: parent.width * 0.45 - 8; elide: Text.ElideRight }
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                visible: parent.count === 0
+                                text: "No gestures are bound"
+                                color: Theme.subtext; font.pixelSize: Theme.fontM
                             }
                         }
                     }
@@ -319,7 +327,7 @@ ApplicationWindow {
         border.color: Theme.glassBorder
         opacity: 0
         property alias label: toastText.text
-        function show(name) { toastText.text = "✓ " + name.replace("_", " "); anim.restart() }
+        function show(name) { toastText.text = "✓ " + name.replace(/_/g, " "); anim.restart() }
         Text { id: toastText; anchors.centerIn: parent; color: Theme.text
                font.pixelSize: Theme.fontM; font.capitalization: Font.Capitalize }
         SequentialAnimation {
@@ -330,8 +338,9 @@ ApplicationWindow {
         }
     }
 
-    // Settings drawer (slides in from the right)
+    // Settings and gesture-editor drawers (slide in from the right)
     SettingsPanel { id: settingsPanel }
+    GesturesPanel { id: gesturesPanel }
 
     // Always-on-top status overlay (toggled in settings)
     Overlay { visible: controller.showOverlay }
@@ -339,6 +348,7 @@ ApplicationWindow {
     // Inline window button component
     component WinButton: Rectangle {
         property string glyph: ""
+        property string tip: ""
         property bool danger: false
         signal clicked()
         width: 34; height: 30; radius: 8
@@ -351,6 +361,9 @@ ApplicationWindow {
         MouseArea {
             id: wbma; anchors.fill: parent; hoverEnabled: true
             cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked()
+            ToolTip.visible: parent.tip !== "" && containsMouse
+            ToolTip.delay: 500
+            ToolTip.text: parent.tip
         }
     }
 }

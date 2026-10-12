@@ -15,6 +15,10 @@ QtObject {
     readonly property color glassStrong: dark ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.80)
     readonly property color glassBorder: dark ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.85)
     readonly property color stroke: dark ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(0, 0, 0, 0.08)
+    // Near-opaque surface for drawers layered over the UI. Without backdrop blur, a translucent
+    // glass fill lets the content underneath show through and makes the drawer unreadable.
+    readonly property color sheet: dark ? Qt.rgba(0.086, 0.106, 0.165, 0.97)
+                                        : Qt.rgba(0.965, 0.973, 0.988, 0.97)
 
     // Text
     readonly property color text: dark ? "#e9edf6" : "#131824"

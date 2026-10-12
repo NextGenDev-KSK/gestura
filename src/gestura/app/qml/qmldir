@@ -5,3 +5,4 @@ PillButton 1.0 PillButton.qml
 SettingRow 1.0 SettingRow.qml
 SettingsPanel 1.0 SettingsPanel.qml
 Overlay 1.0 Overlay.qml
+GesturesPanel 1.0 GesturesPanel.qml

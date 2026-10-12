@@ -39,7 +39,7 @@ Window {
                 anchors.verticalCenter: parent.verticalCenter
                 Text {
                     text: controller.paused ? "Paused"
-                          : (controller.pose === "none" ? "Ready" : controller.pose.replace("_", " "))
+                          : (controller.pose === "none" ? "Ready" : controller.pose.replace(/_/g, " "))
                     color: "white"; font.pixelSize: Theme.fontM; font.weight: Font.DemiBold
                     font.capitalization: Font.Capitalize
                 }

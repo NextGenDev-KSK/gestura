@@ -7,7 +7,9 @@ import "."
 Rectangle {
     id: root
     property bool strong: false
-    color: strong ? Theme.glassStrong : Theme.glass
+    // Opaque variant for drawers that slide over other content (see Theme.sheet).
+    property bool sheet: false
+    color: sheet ? Theme.sheet : (strong ? Theme.glassStrong : Theme.glass)
     radius: Theme.radius
     border.width: 1
     border.color: Theme.glassBorder

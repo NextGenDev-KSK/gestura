@@ -9,22 +9,46 @@ the right thread.
 
 from __future__ import annotations
 
+import re
 import threading
 from enum import Enum
+from typing import Any
 
 import numpy as np
 from pydantic import ValidationError
 from PySide6.QtCore import Property, QObject, QPointF, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
 
-from ..config.models import AppSettings, Theme
+from ..actions.registry import actions_for, get_action
+from ..config.models import AppSettings, GestureBinding, Theme, default_bindings
 from ..config.store import SettingsStore
+from ..core.types import GestureKind
+from ..engine.catalog import BUILTIN_GESTURES, builtin_gesture, gesture_kind
 from ..engine.interpreter import InterpretationResult
-from ..engine.pipeline import GesturePipeline, PipelineTelemetry
-from ..platform import get_adapter
+from ..engine.pipeline import GesturePipeline, PipelineTelemetry, RecordingStatus
+from ..platform import get_adapter, parse_shortcut
 from ..util.logging import get_logger
 
 _log = get_logger("gestura.app.controller")
+
+_CUSTOM_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+_RECORD_SAMPLES = 40
+
+
+def normalize_gesture_name(text: str) -> str:
+    """Turn a user-typed name ("Peace Sign") into a gesture id ("peace_sign").
+
+    Raises:
+        ValueError: with a user-presentable message if the name is unusable.
+    """
+    name = re.sub(r"\s+", "_", text.strip().lower())
+    if not name:
+        raise ValueError("Give the gesture a name first")
+    if not _CUSTOM_NAME.match(name):
+        raise ValueError("Use up to 32 letters, digits, spaces, '-' or '_'")
+    if builtin_gesture(name) is not None:
+        raise ValueError(f"'{name}' is a built-in gesture — pick another name")
+    return name
 
 
 class AppController(QObject):
@@ -41,6 +65,10 @@ class AppController(QObject):
     frameReady = Signal(QImage, list)
     # A recognised gesture fired (name), for transient UI feedback.
     gestureFired = Signal(str)
+    # The gesture -> action map or the custom-gesture library changed.
+    gesturesChanged = Signal()
+    # In-app recording progressed / finished.
+    recordingChanged = Signal()
 
     def __init__(self, settings: AppSettings, store: SettingsStore | None = None,
                  *, dry_run: bool = False, parent: QObject | None = None) -> None:
@@ -69,6 +97,7 @@ class AppController(QObject):
         self._hand_present = False
         self._paused = settings.paused
         self._camera_status = "idle"
+        self._recording = RecordingStatus()
 
         self._timer = QTimer(self)
         self._timer.setInterval(33)  # ~30 Hz UI refresh
@@ -119,6 +148,14 @@ class AppController(QObject):
         for name in gestures:
             self.gestureFired.emit(name)
 
+        recording = self._pipeline.recording_status
+        if recording != self._recording:
+            finished = recording.state == "done" and self._recording.state != "done"
+            self._recording = recording
+            self.recordingChanged.emit()
+            if finished:
+                self.gesturesChanged.emit()  # the new gesture now appears in the editor
+
         if pending is None:
             return
         qimg, points, tele, interp = pending
@@ -144,11 +181,8 @@ class AppController(QObject):
 
     @staticmethod
     def _landmark_points(result) -> list[QPointF]:
-        """All 21 normalized landmark points of the primary hand (empty if none tracked)."""
-        hand = result.primary
-        if hand is None:
-            return []
-        return [QPointF(float(p[0]), float(p[1])) for p in hand.landmarks]
+        """Normalized landmark points of every tracked hand, 21 per hand (empty if none)."""
+        return [QPointF(float(p[0]), float(p[1])) for hand in result.hands for p in hand.landmarks]
 
     # -- QML properties ------------------------------------------------------------------------
     @Property(float, notify=telemetryChanged)
@@ -199,6 +233,28 @@ class AppController(QObject):
     def activeProfile(self) -> str:
         return self._settings.active_profile
 
+    @Property(list, notify=gesturesChanged)
+    def gestureRows(self) -> list[dict[str, Any]]:
+        """One row per gesture (built-in, then custom) with its binding and bindable actions."""
+        return self._gesture_rows()
+
+    @Property(str, notify=recordingChanged)
+    def recordingState(self) -> str:
+        return self._recording.state
+
+    @Property(str, notify=recordingChanged)
+    def recordingName(self) -> str:
+        return self._recording.name
+
+    @Property(float, notify=recordingChanged)
+    def recordingProgress(self) -> float:
+        r = self._recording
+        return r.collected / r.target if r.target else 0.0
+
+    @Property(str, notify=recordingChanged)
+    def recordingMessage(self) -> str:
+        return self._recording.message
+
     # -- QML-invokable slots -------------------------------------------------------------------
     @Slot()
     def togglePause(self) -> None:
@@ -212,6 +268,173 @@ class AppController(QObject):
             return
         self._persist()
         self.themeChanged.emit()
+
+    # -- gesture editor ------------------------------------------------------------------------
+    @Slot(str, str, result=bool)
+    def setGestureAction(self, gesture: str, action: str) -> bool:
+        """Bind ``gesture`` to ``action``; an empty ``action`` unbinds it.
+
+        Rejects actions the gesture can't drive (see :class:`GestureKind`), so the editor can never
+        create a binding that silently does nothing.
+        """
+        if not action:
+            self._replace_binding(gesture, None)
+            return True
+        spec = get_action(action)
+        if spec is None or not spec.accepts_kind(gesture_kind(gesture)):
+            _log.warning("Rejected binding %s -> %s (incompatible)", gesture, action)
+            return False
+        current = self._binding_for(gesture)
+        same_action = current is not None and current.action == action
+        binding = GestureBinding(
+            gesture=gesture,
+            action=action,
+            enabled=current.enabled if current is not None else True,
+            # Params/cooldown are action-specific ("amount" is a % for volume but steps for
+            # scroll), so they reset when the action changes. The shortcut is kept so switching
+            # away from "Keyboard shortcut" and back doesn't lose what the user typed.
+            params=dict(current.params) if same_action and current is not None else {},
+            cooldown=current.cooldown if same_action and current is not None else None,
+            shortcut=list(current.shortcut) if current is not None else [],
+        )
+        self._replace_binding(gesture, binding)
+        return True
+
+    @Slot(str, bool)
+    def setGestureEnabled(self, gesture: str, enabled: bool) -> None:
+        binding = self._binding_for(gesture)
+        if binding is None or binding.enabled == enabled:
+            return
+        binding.enabled = enabled
+        self._bindings_changed()
+
+    @Slot(str, str, result=str)
+    def setGestureShortcut(self, gesture: str, text: str) -> str:
+        """Set the key chord of a "Keyboard shortcut" binding. Returns an error or ``""``."""
+        binding = self._binding_for(gesture)
+        if binding is None:
+            return "Bind the gesture to Keyboard shortcut first"
+        try:
+            keys = parse_shortcut(text)
+        except ValueError as exc:
+            return str(exc)
+        binding.shortcut = keys
+        self._bindings_changed()
+        return ""
+
+    @Slot()
+    def resetGestures(self) -> None:
+        """Restore the built-in gesture map (custom-gesture recordings are kept, but unbound)."""
+        self._settings.profile().bindings = default_bindings()
+        self._bindings_changed()
+
+    # -- gesture trainer -----------------------------------------------------------------------
+    @Slot(str, result=str)
+    def checkRecording(self, name: str) -> str:
+        """Why recording ``name`` can't start now, or ``""`` if it can (checked pre-countdown)."""
+        return self._prepare_recording(name)[1]
+
+    @Slot(str, result=str)
+    def startRecording(self, name: str) -> str:
+        """Start recording a custom gesture. Returns an error message, or ``""`` on success."""
+        gesture, error = self._prepare_recording(name)
+        if gesture is None:
+            return error
+        self._pipeline.start_recording(gesture, samples=_RECORD_SAMPLES)
+        return ""
+
+    def _prepare_recording(self, name: str) -> tuple[str | None, str]:
+        try:
+            gesture = normalize_gesture_name(name)
+        except ValueError as exc:
+            return None, str(exc)
+        if self._pipeline.init_error:
+            return None, "Hand tracking isn't running"
+        if self._camera_status != "streaming":
+            return None, "The camera isn't streaming yet"
+        return gesture, ""
+
+    @Slot()
+    def cancelRecording(self) -> None:
+        self._pipeline.cancel_recording()
+
+    @Slot(str)
+    def deleteCustomGesture(self, name: str) -> None:
+        """Delete a recorded gesture and any binding that pointed at it."""
+        self._pipeline.delete_custom_gesture(name)
+        profile = self._settings.profile()
+        if any(b.gesture == name for b in profile.bindings):
+            profile.bindings = [b for b in profile.bindings if b.gesture != name]
+            self._persist()
+            self._pipeline.apply_settings(self._settings)
+        self.gesturesChanged.emit()
+
+    # -- gesture helpers -----------------------------------------------------------------------
+    def _binding_for(self, gesture: str) -> GestureBinding | None:
+        return next((b for b in self._settings.profile().bindings if b.gesture == gesture), None)
+
+    def _replace_binding(self, gesture: str, binding: GestureBinding | None) -> None:
+        """Make ``binding`` the only binding for ``gesture`` (or remove it), keeping list order."""
+        profile = self._settings.profile()
+        old = profile.bindings
+        index = next((i for i, b in enumerate(old) if b.gesture == gesture), len(old))
+        kept = [b for b in old if b.gesture != gesture]
+        if binding is not None:
+            kept.insert(min(index, len(kept)), binding)
+        profile.bindings = kept
+        self._bindings_changed()
+
+    def _bindings_changed(self) -> None:
+        self._persist()
+        self._pipeline.apply_settings(self._settings)
+        self.gesturesChanged.emit()
+
+    def _gesture_rows(self) -> list[dict[str, Any]]:
+        bound: dict[str, GestureBinding] = {}
+        for b in self._settings.profile().bindings:
+            bound.setdefault(b.gesture, b)
+        custom = self._pipeline.custom_gestures()
+
+        entries: list[tuple[str, str, str, str, GestureKind, bool]] = [
+            (g.id, g.label, g.icon, g.hint, g.kind, False) for g in BUILTIN_GESTURES
+        ]
+        entries += [
+            (name, name.replace("_", " ").capitalize(), "✋", f"Your gesture · {count} samples",
+             GestureKind.TAP, True)
+            for name, count in custom.items()
+        ]
+        # Bindings whose gesture isn't recorded on this PC (e.g. settings copied from another
+        # machine) still show up, so they can be seen and unbound.
+        known = {e[0] for e in entries}
+        entries += [
+            (gid, gid.replace("_", " ").capitalize(), "✋", "Not recorded on this PC",
+             GestureKind.TAP, True)
+            for gid in bound if gid not in known
+        ]
+
+        rows: list[dict[str, Any]] = []
+        for gid, label, icon, hint, kind, is_custom in entries:
+            binding = bound.get(gid)
+            choices = [{"id": "", "label": "Not bound"}] + [
+                {"id": spec.id, "label": spec.label} for spec in actions_for(kind)
+            ]
+            action = binding.action if binding is not None else ""
+            spec = get_action(action) if action else None
+            rows.append({
+                "id": gid,
+                "label": label,
+                "icon": icon,
+                "hint": hint,
+                "custom": is_custom,
+                "recorded": gid in custom,
+                "action": action,
+                "actionLabel": spec.label if spec is not None else action,
+                "enabled": binding.enabled if binding is not None else False,
+                "shortcut": "+".join(binding.shortcut) if binding is not None else "",
+                "choices": choices,
+                "choiceIndex": next((i for i, c in enumerate(choices) if c["id"] == action), 0),
+            })
+        return rows
 
     # -- generic settings access for the settings panel ----------------------------------------
     @Slot(str, result="QVariant")

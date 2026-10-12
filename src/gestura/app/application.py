@@ -70,7 +70,8 @@ def run(argv: list[str] | None = None) -> int:
         controller.stop()
         # Any QML warning during the run is a failure for the self-test.
         real_warnings = [w for w in load_errors if "TypeError" in w or "ReferenceError" in w
-                         or "is not a" in w or "Unable" in w]
+                         or "is not a" in w or "Unable" in w or "Binding loop" in w
+                         or "recursive rearrange" in w]
         if real_warnings:
             for w in real_warnings:
                 _log.error("QML warning: %s", w)

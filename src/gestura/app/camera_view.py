@@ -15,6 +15,8 @@ from PySide6.QtQuick import QQuickPaintedItem
 QML_IMPORT_NAME = "Gestura"
 QML_IMPORT_MAJOR_VERSION = 1
 
+_NUM_LANDMARKS = 21
+
 # MediaPipe 21-point hand skeleton (pairs of landmark indices).
 _HAND_CONNECTIONS: tuple[tuple[int, int], ...] = (
     (0, 1), (1, 2), (2, 3), (3, 4),          # thumb
@@ -39,7 +41,10 @@ class CameraView(QQuickPaintedItem):
 
     @Slot(QImage, list)
     def update_frame(self, image: QImage, points: list) -> None:
-        """Replace the displayed frame and landmark points (normalized 0..1), then repaint."""
+        """Replace the displayed frame and landmark points (normalized 0..1), then repaint.
+
+        ``points`` holds 21 landmarks per tracked hand, hand after hand.
+        """
         self._image = image
         self._points = points
         self.update()
@@ -69,10 +74,12 @@ class CameraView(QQuickPaintedItem):
         self._draw_skeleton(painter, ox, oy, dw, dh)
 
     def _draw_skeleton(self, painter: QPainter, ox: float, oy: float, dw: float, dh: float) -> None:
-        pts = [QPointF(ox + p.x() * dw, oy + p.y() * dh) for p in self._points]
-        if len(pts) < 21:
-            return
+        # Points arrive as consecutive blocks of 21, one block per tracked hand.
+        mapped = [QPointF(ox + p.x() * dw, oy + p.y() * dh) for p in self._points]
+        for start in range(0, len(mapped) - _NUM_LANDMARKS + 1, _NUM_LANDMARKS):
+            self._draw_hand(painter, mapped[start:start + _NUM_LANDMARKS])
 
+    def _draw_hand(self, painter: QPainter, pts: list[QPointF]) -> None:
         # Bones: a soft outer glow then a bright core line.
         glow = QColor(self._accent)
         glow.setAlpha(70)
