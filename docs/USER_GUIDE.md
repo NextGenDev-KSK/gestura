@@ -8,7 +8,7 @@ it. Launch Gestura from the Start menu.
 **Option B — from source.**
 
 ```powershell
-git clone https://github.com/your-org/gestura
+git clone https://github.com/NextGenDev-KSK/gestura
 cd gestura
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -40,6 +40,7 @@ the thumb points** (a diagonal thumb is deliberately ignored).
 | Two quick index pinches | Double-click (via the OS) |
 | **Fist** (hold) | Drag — grabs on close, drops on open |
 | **Two fingers** (index + middle), move up/down | Scroll |
+| **Two-hand pinch** — pinch with both hands, move them apart / together | Zoom in / out (Ctrl + wheel) |
 | **Rock** 🤘 (index + pinky) | Switch window (Alt-Tab) |
 | **Three fingers** (index + middle + ring) | Screenshot |
 | **Pinky** only | Media play / pause |
@@ -55,8 +56,13 @@ Tips:
   signs (screenshot, switch window, media) fire once and re-arm only after you drop the pose.
 - Want more? The **gesture trainer** lets you record your own signs — see below.
 
+Every row above is just the default — rebind any of them in the **Gestures** panel (below).
+
 > **Changed from earlier builds:** the open-palm "pause" hold was removed (open palm is now just a
 > neutral rest pose). Pause/resume lives on the in-app button and can be re-bound to any gesture.
+> Settings saved by older builds are upgraded automatically on first launch: new gestures are
+> added, the retired open-palm binding is dropped, two-hand tracking is switched on, and
+> everything you had changed is kept.
 
 ## The window
 
@@ -65,28 +71,46 @@ Tips:
 - **Pause / Resume** — big button (the instant kill-switch for all control).
 - **Stat tiles** — frame rate, latency, mode (Idle/Drag/Scroll), and hand-tracked state.
 - **Confidence meter** — detection confidence of the current hand.
+- **Gestures list** — what each active gesture currently does; **Edit ›** opens the editor.
+- **✋ Gestures** — the gesture editor and trainer (below).
+- **⚙ Settings** — searchable cursor, recognition and interface tuning, applied live.
 - **Theme toggle** — light / dark (🌓 in the title bar).
+
+## Changing what gestures do (the gesture editor)
+
+Click **✋** in the title bar (or **Edit ›** on the gestures list). Every gesture has a card:
+
+- **Action picker** — choose what the gesture does, or *Not bound* to switch it off entirely.
+  Only actions the gesture can actually drive are listed: a *held* fist can drag, the thumb
+  up/down signs *repeat* while held (volume, brightness), two fingers scroll, the two-hand pinch
+  zooms, and everything else fires once (clicks, screenshot, media, windows, shortcuts…).
+- **On/off switch** — temporarily disable a gesture without losing its binding.
+- **Keyboard shortcut** — pick this action, type the keys joined with `+` (for example
+  `ctrl+shift+s`, `alt+f4`, `win+d`, `ctrl+alt+t`) and press **Enter**. Accepted keys: letters,
+  digits, `ctrl` `alt` `shift` `win`, `tab` `enter` `esc` `space` `backspace` `delete` `insert`
+  `home` `end` `pageup` `pagedown`, the arrows `left` `up` `right` `down`, `printscreen`,
+  `f1`–`f12`, and the media/volume keys. An unknown key is rejected with a message rather than
+  saved.
+- **Reset to default gestures** restores the built-in map (your recorded gestures are kept).
+
+Changes apply instantly and are saved automatically.
 
 ## Custom gestures (the trainer)
 
-Record your own static hand shapes and bind them to actions — fully offline.
+Teach Gestura your own static hand shapes — fully offline.
+
+1. Open **✋ Gestures** and scroll to **Teach a new gesture**.
+2. Type a name (for example *peace sign*) and press **● Record**.
+3. After the 3-2-1 countdown, hold the shape steady in view. Gestura captures 40 frames (about a
+   second) and saves the gesture. Nothing you do while recording triggers an action.
+4. The new gesture appears in the list — choose its action.
+
+Recording a name that already exists replaces its samples, which is the fix if a gesture
+misfires. Delete a custom gesture with its 🗑 button. You can also record from a terminal:
 
 ```powershell
 python scripts\record_gesture.py --name peace --samples 40
 ```
-
-Hold the shape steady during the countdown and capture. Then bind it. Until the in-app editor
-ships you can add a binding to `settings.json` (see below), e.g.:
-
-```json
-{ "gesture": "peace", "action": "screenshot" }
-```
-
-Available actions include: `left_click`, `right_click`, `middle_click`, `double_click`, `drag`,
-`scroll`, `volume_up`, `volume_down`, `brightness_up`, `brightness_down`, `screenshot`,
-`media_play_pause`, `media_next`, `media_prev`, `window_minimize`, `window_maximize`,
-`window_snap_left`, `window_snap_right`, `window_close`, `switch_window`, `show_desktop`,
-`pause_toggle`.
 
 ## Where your data lives
 

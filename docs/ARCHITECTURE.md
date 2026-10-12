@@ -1,7 +1,7 @@
 # Architecture
 
 Gestura is a **layered** application. Each layer depends only on the layer(s) below it, through
-small, explicit interfaces. This keeps every module independently testable (85+ tests run with no
+small, explicit interfaces. This keeps every module independently testable (150+ tests run with no
 camera, GPU, or display) and makes the Windows-specific code swappable for a future Linux port.
 
 ```
@@ -93,17 +93,43 @@ Trustworthiness is a *temporal* property, concentrated in
 | `core` | Pure logic: domain types, geometry, filters, timing (no heavy deps) |
 | `config` | Pydantic settings models + atomic, self-healing JSON store |
 | `vision` | Threaded camera + MediaPipe tracker → typed `FrameResult` |
-| `engine` | Features, recognizers, cursor, interpreter, custom classifier, pipeline |
-| `actions` | Action registry (data-driven) + dispatcher (owns pause) |
+| `engine` | Features, recognizers, gesture catalogue, cursor, interpreter, custom classifier, pipeline (incl. in-app recording) |
+| `actions` | Action registry (data-driven, declares which gesture kinds each action accepts) + dispatcher (owns pause) |
 | `platform` | `OSAdapter` interface + Windows backend + `RecordingAdapter` (tests) |
 | `app` | Qt bootstrap, `AppController` bridge, `CameraView`, QML UI |
 | `util` | Cross-platform paths, logging |
 
 ## Extending
 
-- **New action**: add one `ActionSpec` to `actions/registry.py`. It appears in the settings list
+- **New action**: add one `ActionSpec` to `actions/registry.py`, declaring in `accepts` which
+  `GestureKind`s can drive it. It appears in the gesture editor for every compatible gesture
   automatically.
 - **New built-in gesture**: add a recogniser in `engine/recognizers.py` and handle it in the
-  interpreter; bind it in `config/models.py::DEFAULT_BINDINGS`.
+  interpreter; list it (label, icon, `GestureKind`) in `engine/catalog.py`; bind it in
+  `config/models.py::DEFAULT_BINDINGS` — and add a settings migration in `config/store.py` so
+  existing installs receive it.
+
+## Gesture kinds
+
+A binding only works if the gesture emits the event phases its action listens for, so every
+gesture declares a `GestureKind` (`core/types.py`) and every action declares the kinds it
+accepts:
+
+| Kind | Events | Gestures | Actions |
+|------|--------|----------|---------|
+| `TAP` | `BEGAN`+`ENDED` together | pinches, one-shot signs, custom | clicks, screenshot, media, window, shortcut, pause |
+| `HOLD` | `BEGAN` … `ENDED` | fist | drag, plus everything a tap can do |
+| `REPEAT` | repeated `UPDATED` | thumb up / down | volume, brightness |
+| `SCROLL` | `UPDATED` with `dy` | two fingers | scroll |
+| `ZOOM` | `UPDATED` with `scale` | two-hand pinch | zoom |
+
+The gesture editor offers only compatible actions, and the controller rejects anything else.
+
+## Settings migrations
+
+`config/store.py` upgrades older `settings.json` files step by step (`_MIGRATIONS`), then saves
+the result so each step runs once. v1 → v2 adds newly-introduced default gestures without
+touching bindings the user already has, drops bindings to retired gestures, and enables two-hand
+tracking for zoom.
 - **New platform**: implement `platform/base.py::OSAdapter` for the OS and return it from
   `platform/__init__.py::get_adapter`. Nothing above the adapter changes.

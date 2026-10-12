@@ -3,7 +3,7 @@
 ## Setup
 
 ```powershell
-git clone https://github.com/your-org/gestura
+git clone https://github.com/NextGenDev-KSK/gestura
 cd gestura
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -27,7 +27,7 @@ Requires Python 3.10–3.12.
 | Tests + coverage | `pytest --cov=gestura --cov-report=term-missing` |
 | Lint | `ruff check src tests scripts` |
 | Auto-fix lint | `ruff check --fix src tests scripts` |
-| Types | `mypy` |
+| Types | `mypy` (strict; uses the pydantic plugin — not yet a CI gate) |
 
 ## Testing philosophy
 
@@ -50,9 +50,13 @@ Run only fast unit tests: `pytest tests/unit`.
 
 ## Common extension points
 
-- **Add an action** → one `ActionSpec` in `actions/registry.py`.
+- **Add an action** → one `ActionSpec` in `actions/registry.py` (set `accepts` to the gesture
+  kinds that can drive it; see "Gesture kinds" in `ARCHITECTURE.md`).
 - **Add a built-in gesture** → recogniser in `engine/recognizers.py`, handling in
-  `engine/interpreter.py`, default binding in `config/models.py`.
+  `engine/interpreter.py`, an entry in `engine/catalog.py`, a default binding in
+  `config/models.py`, and a migration in `config/store.py` so existing users get it.
+- **Change the settings schema** → bump `SCHEMA_VERSION` in `config/models.py` and register a
+  step in `config/store.py::_MIGRATIONS` (with a test that loads a file in the old shape).
 - **Tune recognition** → `GestureThresholds` / `CursorConfig` in `config/models.py` (all live in
   `settings.json` and hot-reload via `pipeline.apply_settings`).
 - **Port to another OS** → implement `platform/base.py::OSAdapter`, wire it in

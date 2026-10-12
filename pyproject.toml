@@ -56,9 +56,9 @@ packaging = ["pyinstaller>=6.6"]
 gestura = "gestura.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/your-org/gestura"
-Documentation = "https://github.com/your-org/gestura/tree/main/docs"
-Issues = "https://github.com/your-org/gestura/issues"
+Homepage = "https://github.com/NextGenDev-KSK/gestura"
+Documentation = "https://github.com/NextGenDev-KSK/gestura/tree/main/docs"
+Issues = "https://github.com/NextGenDev-KSK/gestura/issues"
 
 # --- Tooling ------------------------------------------------------------------
 [tool.hatch.build.targets.wheel]
@@ -99,6 +99,8 @@ python_version = "3.10"
 packages = ["gestura"]
 strict = true
 warn_unreachable = true
+# Teaches mypy pydantic's field defaults/validation (otherwise every model call is a false error).
+plugins = ["pydantic.mypy"]
 # Third-party libs without type stubs:
 [[tool.mypy.overrides]]
 module = ["mediapipe.*", "cv2.*", "pycaw.*", "comtypes.*", "screen_brightness_control.*", "win32*"]

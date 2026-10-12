@@ -5,8 +5,9 @@
 **Control your computer with your hands — fully offline, privacy-first.**
 
 Gestura turns any webcam into a low-latency gesture controller: move the cursor, click,
-scroll, zoom, adjust volume and brightness, manage windows, and fire your own custom
-gestures — all processed locally on your machine. No cloud, no account, no telemetry.
+drag, scroll, zoom, adjust volume and brightness, control media, switch windows, fire keyboard
+shortcuts, and teach it your own gestures — all processed locally on your machine. No cloud, no
+account, no telemetry.
 
 *(Working title — the package name `gestura` is trivial to rename; see `docs/DEVELOPER_GUIDE.md`.)*
 
@@ -17,43 +18,115 @@ gestures — all processed locally on your machine. No cloud, no account, no tel
 ## Why Gestura
 
 - **Offline by default.** Every frame is processed on-device with Google MediaPipe. Nothing
-  leaves your computer.
+  leaves your computer — Gestura makes no network connections at runtime.
 - **Fast.** CPU-first pipeline targeting **60 FPS** capture and **< 20 ms** gesture-to-action
   latency, with an optional GPU delegate.
 - **Trustworthy.** Aggressive false-positive prevention: temporal smoothing, confidence gating,
-  per-gesture cooldowns, and tracking-loss recovery so the cursor never "jumps" or misclicks.
-- **Yours.** Record, name, and bind your own gestures with no code. Multiple profiles.
-- **Beautiful.** A native Qt6/QML interface with real glassmorphism, live camera preview,
-  landmark overlay, and an FPS/confidence HUD.
+  hysteresis, per-gesture cooldowns, and tracking-loss recovery so the cursor never "jumps" or
+  misclicks.
+- **Yours.** Rebind any gesture, record your own, and map gestures to key chords — all from the
+  app, no config files or code.
+- **Native.** A Qt 6 / QML interface with glassmorphism, live camera preview with hand-skeleton
+  overlay, FPS/latency/confidence HUD, an always-on-top status overlay, and light/dark themes.
+
+## Features
+
+| Area | What you get |
+|------|--------------|
+| Pointer | Cursor follows your knuckles (so pinching never nudges it), One-Euro smoothing, dead zone, adjustable active area |
+| Mouse | Left / right / middle click (three distinct pinches), double-click, fist-hold drag, two-finger scroll, **two-hand pinch-to-zoom** |
+| System | Volume, brightness, screenshot, media play/pause/next/previous, window switch/minimise/maximise/snap/close, show desktop |
+| Shortcuts | Bind any gesture to **any key chord** (e.g. `ctrl+shift+s`, `alt+f4`, `win+d`) |
+| Gesture editor | Rebind, enable/disable, or unbind every gesture in-app. Only actions a gesture can actually drive are offered, so a binding can't silently do nothing |
+| Gesture trainer | Name a hand shape, press **Record**, hold it for ~1 s — Gestura learns it from 40 frames on-device, ready to bind |
+| Reliability | Stability gates, cooldowns, exclusive drag/scroll/zoom modes, clean release on tracking loss, automatic camera reconnection |
+| Settings | Live, searchable settings panel; typed, validated, atomically-saved config with automatic schema migration |
+
+The full gesture vocabulary and usage tips are in the [user guide](docs/USER_GUIDE.md).
+
+## Technologies
+
+- **Python 3.10 – 3.12**
+- **MediaPipe** Hand Landmarker (21-point hand tracking, offline) + **OpenCV** (camera capture)
+- **NumPy** (feature extraction, nearest-prototype custom-gesture classifier)
+- **PySide6 / Qt 6 Quick (QML)** — UI
+- **Pydantic v2** — typed, validated settings
+- **Win32 `SendInput`** via `ctypes` (input injection), **pycaw** (volume),
+  **screen-brightness-control** (brightness), **Pillow** (screenshots)
+- **pytest**, **Ruff**, **mypy**; **PyInstaller** + **Inno Setup** for the Windows build;
+  GitHub Actions CI
+
+Every dependency is justified in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
 ## Status
 
-Early development. The architecture, core pipeline, and Windows integration are the current
-focus. See the roadmap in `docs/ARCHITECTURE.md` and progress in the repo's issues/milestones.
+**Alpha (v0.1)** — the full pipeline, every gesture above, the in-app gesture editor and trainer,
+and the Windows integration are implemented and covered by an automated test suite that runs
+without a camera. A Linux port is an architectural goal (the OS layer is a single interface) but
+not yet implemented.
 
 ## Requirements
 
-- Windows 10/11 (a Linux port is an explicit architectural goal; see the platform layer)
-- Python 3.10 – 3.12
+- Windows 10 or 11
+- Python 3.10 – 3.12 (to run from source)
 - A webcam
 
 ## Quick start (from source)
 
 ```powershell
-git clone https://github.com/your-org/gestura
+git clone https://github.com/NextGenDev-KSK/gestura
 cd gestura
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-python scripts\fetch_models.py      # downloads the MediaPipe hand-landmark model
+python scripts\fetch_models.py      # downloads the MediaPipe hand-landmark model (~7.8 MB)
 gestura                             # launch the app
 ```
 
-Run the headless pipeline smoke test (no UI, proves camera → tracking → cursor):
+Useful variants:
 
 ```powershell
-python -m gestura.engine.pipeline --demo
+python -m gestura --dry-run              # full app, but injects no real input (safe demo)
+python -m gestura --self-test 2          # load the UI, verify it, exit (no camera needed)
+python -m gestura.engine.pipeline --demo # headless: camera -> tracking -> gestures, in the console
+python scripts\diagnose.py               # camera + tracker health and performance report
 ```
+
+## Configuration
+
+No API keys, accounts or environment variables are needed. Everything is configured in the app
+(⚙ **Settings** and ✋ **Gestures**) and stored per user:
+
+| What | Where |
+|------|-------|
+| Settings (tuning, bindings, theme) | `%APPDATA%\Gestura\settings.json` |
+| Recorded custom gestures | `%LOCALAPPDATA%\Gestura\custom_gestures.json` |
+| Screenshots | `%LOCALAPPDATA%\Gestura\screenshots\` |
+| Logs | `%LOCALAPPDATA%\Gestura\logs\gestura.log` |
+
+A corrupt settings file is backed up and replaced with defaults instead of crashing the app, and
+settings written by older versions are migrated automatically (your own edits are kept).
+
+## Testing
+
+```powershell
+pytest                              # 150+ unit tests — no camera, GPU or display required
+pytest --cov=gestura                # with coverage
+ruff check src tests scripts        # lint
+python -m gestura --self-test 2     # the UI loads with no QML errors
+```
+
+CI runs lint, the test suite (Windows, Python 3.11 and 3.12) and the UI self-test on every push.
+
+## Building the Windows app
+
+```powershell
+pip install -e ".[dev,packaging]"
+python scripts\build_exe.py         # -> dist\Gestura\Gestura.exe
+iscc packaging\gestura_installer.iss  # -> installer (requires Inno Setup)
+```
+
+See [`docs/RELEASE.md`](docs/RELEASE.md) for the full release checklist.
 
 ## Architecture at a glance
 
@@ -71,10 +144,12 @@ OS Adapter (Windows)     ─┘
 
 | Doc | Purpose |
 |-----|---------|
+| [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | Installing and using the app, every gesture, troubleshooting |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design, layers, data flow |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Architecture Decision Records (why each library) |
-| [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | Installing and using the app |
+| [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Frame-rate and latency notes |
 | [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) | Building, testing, extending |
+| [`docs/RELEASE.md`](docs/RELEASE.md) | Release checklist |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute |
 
 ## License
