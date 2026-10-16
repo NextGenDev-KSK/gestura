@@ -24,13 +24,15 @@ A repeatable process for cutting a Gestura release.
 - [ ] `python scripts/build_exe.py` — produces `dist/Gestura/Gestura.exe`.
 - [ ] Launch `dist/Gestura/Gestura.exe` on a clean Windows VM (no Python installed) and confirm it
       runs, finds its model, and controls the cursor.
-- [ ] `iscc packaging/gestura_installer.iss` — produces `packaging/dist/GesturaSetup.exe`.
+- [ ] `iscc packaging/gestura_installer.iss` — produces `packaging/dist/GesturaSetup-<version>.exe`
+      (per-user install, no admin prompt).
 - [ ] Install via the setup EXE on the clean VM; verify Start-menu/desktop shortcuts and uninstall.
 
 ## 4. Publish
 
 - [ ] `git tag -a vX.Y.Z -m "Gestura vX.Y.Z"` and push the tag.
-- [ ] Create the GitHub Release; attach `GesturaSetup.exe` and the zipped `dist/Gestura` folder.
+- [ ] Create the GitHub Release; attach `GesturaSetup-<version>.exe`, the zipped `dist/Gestura`
+      folder (`Gestura-<version>-windows-x64-portable.zip`) and `SHA256SUMS.txt`.
 - [ ] Verify the CI run on the tag is green.
 - [ ] Announce / update the README download link.
 

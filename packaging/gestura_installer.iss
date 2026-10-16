@@ -3,7 +3,7 @@
 ; Prerequisites:
 ;   1. python scripts/build_exe.py        (produces dist/Gestura/)
 ;   2. Install Inno Setup 6 (https://jrsoftware.org/isinfo.php)
-;   3. iscc packaging\gestura_installer.iss   (produces packaging/dist/GesturaSetup.exe)
+;   3. iscc packaging\gestura_installer.iss   (produces packaging/dist/GesturaSetup-<version>.exe)
 
 #define AppName "Gestura"
 #define AppVersion "0.2.0"
@@ -24,9 +24,15 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=dist
-OutputBaseFilename=GesturaSetup
+OutputBaseFilename=GesturaSetup-{#AppVersion}
 LicenseFile=..\LICENSE
 DisableProgramGroupPage=yes
+; Gestura is a per-user app (settings, startup entry), so install for the current user without
+; an admin prompt by default; the wizard still offers an all-users install.
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+VersionInfoVersion={#AppVersion}
+UninstallDisplayName={#AppName} {#AppVersion}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

@@ -81,6 +81,17 @@ and the Windows integration are implemented and covered by an automated test sui
 without a camera. A Linux port is an architectural goal (the OS layer is a single interface) but
 not yet implemented.
 
+## Download
+
+Get the latest version from the **[Releases page](https://github.com/NextGenDev-KSK/gestura/releases/latest)**:
+
+- **`GesturaSetup-<version>.exe`** (recommended): installs for your Windows account, no admin
+  rights needed. Adds a Start-menu entry and an uninstaller.
+- **`Gestura-<version>-windows-x64-portable.zip`**: no installation; extract anywhere and run
+  `Gestura\Gestura.exe`.
+
+Windows may show *"Windows protected your PC"* the first time, because the app isn't code-signed yet. Click **More info → Run anyway**. Each release lists SHA-256 checksums so you can verify your download.
+
 ## Requirements
 
 - Windows 10 or 11

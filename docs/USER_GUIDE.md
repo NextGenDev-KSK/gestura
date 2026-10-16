@@ -2,8 +2,16 @@
 
 ## Installing
 
-**Option A — installer (recommended).** Download `GesturaSetup.exe` from the Releases page and run
-it. Launch Gestura from the Start menu.
+**Option A — installer (recommended).** Download `GesturaSetup-<version>.exe` from the
+[Releases page](https://github.com/NextGenDev-KSK/gestura/releases/latest) and run it. It installs
+for your Windows account without needing admin rights (the wizard can install for all users
+instead). Launch Gestura from the Start menu; uninstall it from *Settings → Apps*. Your settings
+are kept on uninstall.
+
+Windows may show *"Windows protected your PC"* the first time, because the app isn't code-signed yet. Click **More info → Run anyway**.
+
+**Portable.** Prefer not to install? Download `Gestura-<version>-windows-x64-portable.zip`, extract
+it anywhere, and run `Gestura\Gestura.exe`.
 
 **Option B — from source.**
 

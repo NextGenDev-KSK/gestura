@@ -62,6 +62,38 @@ a = Analysis(
     noarchive=False,
 )
 
+# Bundling the whole PySide6 qml/plugins trees (above) drags in every Qt add-on and its DLLs:
+# a 196 MB web browser engine, 3D, charts, maps, multimedia + FFmpeg, PDF, SQL, serial ports, the
+# virtual keyboard, every Controls style... none of which Gestura uses (its QML imports only
+# QtQuick, QtQuick.Controls.Basic, QtQuick.Layouts and QtQuick.Effects). Dropping them cuts the
+# download roughly in half. OpenCV's FFmpeg plugin only reads video files/streams; webcams use the
+# built-in Media Foundation / DirectShow backends. If you start using one of these Qt modules,
+# remove its entry here.
+_UNUSED = (
+    "webengine", "qtwebview", "webview", "webchannel", "websockets",
+    "qt63d", "qt3d", "quick3d", "assetimporters", "sceneparsers", "renderers", "renderplugins",
+    "geometryloaders", "charts", "datavisualization", "qt6graphs", "qtgraphs",
+    "location", "positioning", "/position/", "multimedia", "avcodec-", "avformat-", "avutil-",
+    "swresample-", "swscale-", "opencv_videoio_ffmpeg", "qt6pdf", "qtpdf", "remoteobjects",
+    "scxml", "sensors", "serialbus", "serialport", "spatialaudio", "qt6sql", "sqldrivers",
+    "statemachine", "qt6test", "quicktest", "qttest", "texttospeech", "virtualkeyboard",
+    "qt6designer", "qmlcompiler", "qmllint", "qmltooling", "qt6lottie", "quicktimeline",
+    "quickparticles", "quickdialogs2", "quickwidgets", "openglwidgets", "printsupport",
+    "qt6labs", "/labs/", "qt5compat", "controls2material", "controls2universal",
+    "controls2imagine", "controls2fusion", "fluentwinui3", "controls2windowsstyle",
+    "/controls/material", "/controls/universal", "/controls/imagine", "/controls/fusion",
+    "/controls/fluentwinui3", "/controls/windows", "pyside6/translations",
+)
+
+
+def _keep(entry) -> bool:
+    dest = entry[0].replace("\\", "/").lower()
+    return not any(token in dest for token in _UNUSED)
+
+
+a.binaries = [b for b in a.binaries if _keep(b)]
+a.datas = [d for d in a.datas if _keep(d)]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
