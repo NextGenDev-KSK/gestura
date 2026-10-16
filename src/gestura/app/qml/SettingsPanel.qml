@@ -78,14 +78,22 @@ Item {
                     width: parent.width
                     spacing: 6
 
+                    SettingGroup { title: "Camera"; filter: search.text }
+                    CameraPicker { filter: search.text }
+                    SettingToggle { filter: search.text; label: "Show camera preview"
+                                    path: "ui.show_camera_preview" }
+                    SettingToggle { filter: search.text; label: "Mirror camera (selfie view)"
+                                    path: "profile.camera.mirror" }
+
                     SettingGroup { title: "Cursor"; filter: search.text }
+                    CalibrationRow { filter: search.text }
                     SettingRow { filter: search.text; label: "Smoothing (steadiness)"
                                  path: "profile.cursor.smoothing_min_cutoff"; minv: 0.3; maxv: 5; stepSize: 0.1 }
                     SettingRow { filter: search.text; label: "Responsiveness (less lag)"
                                  path: "profile.cursor.smoothing_beta"; minv: 0; maxv: 0.4; stepSize: 0.01 }
                     SettingRow { filter: search.text; label: "Dead zone"
                                  path: "profile.cursor.dead_zone"; minv: 0; maxv: 0.03; stepSize: 0.001 }
-                    SettingRow { filter: search.text; label: "Active area margin"
+                    SettingRow { filter: search.text; label: "Active area margin (uncalibrated)"
                                  path: "profile.cursor.region_margin_x"; minv: 0; maxv: 0.35; stepSize: 0.01 }
 
                     SettingGroup { title: "Recognition"; filter: search.text }
@@ -98,11 +106,18 @@ Item {
                     SettingRow { filter: search.text; label: "Hold-to-accept time"
                                  path: "profile.thresholds.stability_time"; minv: 0; maxv: 0.3; stepSize: 0.01; suffix: " s" }
 
+                    SettingGroup { title: "Background & startup"; filter: search.text }
+                    SettingToggle { filter: search.text; label: "Keep running in the tray when closed"
+                                    path: "ui.close_to_tray" }
+                    SettingToggle { filter: search.text; label: "Start with Windows"
+                                    path: "ui.launch_on_startup"; available: controller.autostartSupported }
+                    SettingToggle { filter: search.text; label: "Start minimized to the tray"
+                                    path: "ui.start_minimized" }
+                    HotkeyRow { filter: search.text }
+
                     SettingGroup { title: "Interface"; filter: search.text }
                     SettingToggle { filter: search.text; label: "Status overlay"
                                     path: "ui.show_overlay" }
-                    SettingToggle { filter: search.text; label: "Mirror camera (selfie view)"
-                                    path: "profile.camera.mirror" }
 
                     // About footer — the last thing in the panel.
                     Column {
@@ -139,19 +154,146 @@ Item {
         }
     }
 
+    // Shared filter logic for the custom rows below.
+    component FilteredRow: Item {
+        property string label: ""
+        property string filter: ""
+        readonly property bool matches:
+            filter === "" || label.toLowerCase().indexOf(filter.toLowerCase()) !== -1
+        width: parent ? parent.width : 300
+        visible: matches
+    }
+
+    // Which webcam to use. Switching reopens the camera in the background.
+    component CameraPicker: FilteredRow {
+        id: cp
+        label: "Camera"
+        height: matches ? 50 : 0
+        Row {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            spacing: 8
+            Text { text: cp.label; color: Theme.text; font.pixelSize: Theme.fontM
+                   width: parent.width - camCombo.width - detect.width - 16
+                   anchors.verticalCenter: parent.verticalCenter }
+            GlassCombo {
+                id: camCombo
+                width: 130
+                dimFirst: false
+                anchors.verticalCenter: parent.verticalCenter
+                model: controller.cameras.map(function (i) { return { label: "Camera " + (i + 1) } })
+                textRole: "label"
+                currentIndex: controller.cameras.indexOf(controller.cameraIndex)
+                onActivated: function (i) { controller.setCamera(controller.cameras[i]) }
+            }
+            PillButton {
+                id: detect
+                width: 76; height: 32
+                text: controller.probingCameras ? "..." : "Detect"
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: controller.refreshCameras()
+            }
+        }
+    }
+
+    // Fit the cursor's active area to the user's own reach.
+    component CalibrationRow: FilteredRow {
+        id: cal
+        label: "Reach calibration"
+        property string error: ""
+        height: matches ? (error !== "" ? 76 : 58) : 0
+        Column {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            spacing: 4
+            Row {
+                width: parent.width
+                spacing: 8
+                Column {
+                    width: parent.width - calBtn.width - resetBtn.width - 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text { text: cal.label; color: Theme.text; font.pixelSize: Theme.fontM }
+                    Text { text: controller.calibrated ? "Using your calibrated reach"
+                                                       : "Using the default active area"
+                           color: controller.calibrated ? Theme.good : Theme.subtext
+                           font.pixelSize: Theme.fontS }
+                }
+                PillButton {
+                    id: calBtn
+                    width: 92; height: 32
+                    accentFill: true
+                    text: "Calibrate"
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: {
+                        cal.error = controller.startCalibration()
+                        if (cal.error === "") panel.open = false   // let them see the camera
+                    }
+                }
+                PillButton {
+                    id: resetBtn
+                    width: controller.calibrated ? 64 : 0
+                    visible: controller.calibrated
+                    height: 32
+                    text: "Reset"
+                    anchors.verticalCenter: parent.verticalCenter
+                    onClicked: controller.resetCalibration()
+                }
+            }
+            Text { visible: cal.error !== ""; text: cal.error; color: Theme.bad
+                   font.pixelSize: Theme.fontS; width: parent.width; wrapMode: Text.WordWrap }
+        }
+    }
+
+    // The system-wide pause/resume hotkey.
+    component HotkeyRow: FilteredRow {
+        id: hk
+        label: "Pause / resume hotkey"
+        property string error: ""
+        readonly property string shownError: error !== "" ? error : controller.hotkeyError
+        height: matches ? (shownError !== "" ? 70 : 50) : 0
+        Column {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            spacing: 4
+            Row {
+                width: parent.width
+                spacing: 8
+                Text { text: hk.label; color: Theme.text; font.pixelSize: Theme.fontM
+                       width: parent.width - keys.width - 8
+                       anchors.verticalCenter: parent.verticalCenter }
+                GlassField {
+                    id: keys
+                    width: 140
+                    text: controller.pauseHotkey
+                    placeholderText: "ctrl+alt+g"
+                    onAccepted: hk.error = controller.setPauseHotkey(text)
+                    onActiveFocusChanged: if (!activeFocus) text = controller.pauseHotkey
+                }
+            }
+            Text { visible: hk.shownError !== ""; text: hk.shownError; color: Theme.bad
+                   font.pixelSize: Theme.fontS; width: parent.width; wrapMode: Text.WordWrap }
+        }
+    }
+
     // Inline boolean toggle bound to a settings path
     component SettingToggle: Item {
         id: toggle
         property string label: ""
         property string path: ""
         property string filter: ""
+        property bool available: true
         property bool value: false
-        readonly property bool matches:
-            filter === "" || label.toLowerCase().indexOf(filter.toLowerCase()) !== -1
+        readonly property bool matches: available &&
+            (filter === "" || label.toLowerCase().indexOf(filter.toLowerCase()) !== -1)
         width: parent ? parent.width : 300
         height: matches ? 44 : 0
         visible: matches
         Component.onCompleted: value = controller.getSetting(path) === true
+        // The app can refuse a change (e.g. Windows startup unavailable): show the real value.
+        Connections {
+            target: controller
+            function onSettingsChanged() { toggle.value = controller.getSetting(toggle.path) === true }
+        }
         Row {
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width

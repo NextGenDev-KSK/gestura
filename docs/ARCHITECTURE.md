@@ -93,10 +93,10 @@ Trustworthiness is a *temporal* property, concentrated in
 | `core` | Pure logic: domain types, geometry, filters, timing (no heavy deps) |
 | `config` | Pydantic settings models + atomic, self-healing JSON store |
 | `vision` | Threaded camera + MediaPipe tracker → typed `FrameResult` |
-| `engine` | Features, recognizers, gesture catalogue, cursor, interpreter, custom classifier, pipeline (incl. in-app recording) |
+| `engine` | Features, recognizers, gesture catalogue, cursor + reach calibration, interpreter, custom classifier, pipeline (in-app recording, live camera restarts) |
 | `actions` | Action registry (data-driven, declares which gesture kinds each action accepts) + dispatcher (owns pause) |
-| `platform` | `OSAdapter` interface + Windows backend + `RecordingAdapter` (tests) |
-| `app` | Qt bootstrap, `AppController` bridge, `CameraView`, QML UI |
+| `platform` | `OSAdapter` interface + Windows backend + `RecordingAdapter` (tests); global pause hotkey; start-with-Windows entry |
+| `app` | Qt bootstrap (system tray, single instance, start minimized), `AppController` bridge, `CameraView`, QML UI |
 | `util` | Cross-platform paths, logging |
 
 ## Extending

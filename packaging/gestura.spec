@@ -42,10 +42,11 @@ for _sub in ("qml", "plugins"):
     if os.path.isdir(_src):
         datas.append((_src, f"PySide6/{_sub}"))
 
-# Bundle our QML UI and the hand-landmark model.
+# Bundle our QML UI, the hand-landmark model, and the window/tray icons.
 datas += [
     (_p("src", "gestura", "app", "qml"), "gestura/app/qml"),
     (_p("models", "hand_landmarker.task"), "models"),
+    (_p("assets", "icons"), "assets/icons"),
 ]
 
 _icon = _p("assets", "icons", "gestura.ico")

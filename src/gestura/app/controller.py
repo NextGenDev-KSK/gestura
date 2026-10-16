@@ -25,10 +25,19 @@ from ..config.models import AppSettings, GestureBinding, Theme, default_bindings
 from ..config.store import SettingsStore
 from ..core.types import GestureKind
 from ..engine.catalog import BUILTIN_GESTURES, builtin_gesture, gesture_kind
+from ..engine.cursor import active_region
 from ..engine.interpreter import InterpretationResult
-from ..engine.pipeline import GesturePipeline, PipelineTelemetry, RecordingStatus
+from ..engine.pipeline import (
+    CalibrationStatus,
+    GesturePipeline,
+    PipelineTelemetry,
+    RecordingStatus,
+)
 from ..platform import get_adapter, parse_shortcut
+from ..platform.autostart import AutoStart
+from ..platform.hotkey import GlobalHotkey, parse_hotkey
 from ..util.logging import get_logger
+from ..vision.camera import list_cameras
 
 _log = get_logger("gestura.app.controller")
 
@@ -70,13 +79,30 @@ class AppController(QObject):
     gesturesChanged = Signal()
     # In-app recording progressed / finished.
     recordingChanged = Signal()
+    # Reach calibration progressed / finished.
+    calibrationChanged = Signal()
+    # The list of detected cameras changed (after a refresh).
+    camerasChanged = Signal()
+    # The global hotkey was (re)registered, or failed to be.
+    hotkeyChanged = Signal()
+    # The user closed the window; the app decides whether that hides to the tray or quits.
+    closeRequested = Signal()
+    # A short message for the tray/notification area (e.g. "Paused").
+    notify = Signal(str, str)
 
     def __init__(self, settings: AppSettings, store: SettingsStore | None = None,
-                 *, dry_run: bool = False, parent: QObject | None = None) -> None:
+                 *, dry_run: bool = False, autostart: AutoStart | None = None,
+                 parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._settings = settings
         self._store = store
         self._adapter = get_adapter(dry_run=dry_run)
+        self._autostart = autostart if autostart is not None else AutoStart()
+        self._hotkey: GlobalHotkey | None = None
+        self._hotkey_error = ""
+        self._cameras: list[int] = [settings.profile().camera.device_index]
+        self._cameras_pending: list[int] | None = None
+        self._probing = False
 
         self._pipeline = GesturePipeline(
             settings, self._adapter,
@@ -85,7 +111,8 @@ class AppController(QObject):
         )
 
         self._lock = threading.Lock()
-        self._pending: tuple[QImage, list, PipelineTelemetry, InterpretationResult] | None = None
+        self._pending: tuple[QImage | None, list, PipelineTelemetry, InterpretationResult] | None \
+            = None
         self._pending_gestures: list[str] = []
         self._camera_status_pending: str | None = None
 
@@ -99,6 +126,7 @@ class AppController(QObject):
         self._paused = settings.paused
         self._camera_status = "idle"
         self._recording = RecordingStatus()
+        self._calibration = CalibrationStatus()
 
         self._timer = QTimer(self)
         self._timer.setInterval(33)  # ~30 Hz UI refresh
@@ -108,15 +136,34 @@ class AppController(QObject):
     def start(self) -> None:
         self._pipeline.start()
         self._timer.start()
+        self._register_hotkey()
 
     def stop(self) -> None:
         self._timer.stop()
+        if self._hotkey is not None:
+            self._hotkey.stop()
+            self._hotkey = None
         self._pipeline.stop()
+
+    # -- global pause hotkey -------------------------------------------------------------------
+    def _register_hotkey(self) -> None:
+        if self._hotkey is not None:
+            self._hotkey.stop()
+        self._hotkey = GlobalHotkey(self._settings.ui.pause_hotkey, self._on_hotkey)
+        ok = self._hotkey.start()
+        self._hotkey_error = "" if ok else (self._hotkey.error or "")
+        self.hotkeyChanged.emit()
+
+    def _on_hotkey(self) -> None:
+        # Runs on the hotkey thread: flipping the dispatcher's flag is thread-safe, and the UI
+        # picks the new state up on its next tick.
+        self._pipeline.toggle_pause()
 
     # -- worker-thread callbacks (do minimal work, no Qt object mutation) ----------------------
     def _on_update(self, image_bgr: np.ndarray, result, interp: InterpretationResult,
                    tele: PipelineTelemetry) -> None:
-        qimg = self._to_qimage(image_bgr)
+        # With the preview hidden there's nothing to draw, so skip the per-frame image copy.
+        qimg = self._to_qimage(image_bgr) if self._settings.ui.show_camera_preview else None
         points = self._landmark_points(result)
         with self._lock:
             self._pending = (qimg, points, tele, interp)
@@ -157,6 +204,27 @@ class AppController(QObject):
             if finished:
                 self.gesturesChanged.emit()  # the new gesture now appears in the editor
 
+        calibration = self._pipeline.calibration_status
+        if calibration != self._calibration:
+            if calibration.state == "done" and self._calibration.state != "done" \
+                    and calibration.region is not None:
+                self._set("profile.cursor.region", list(calibration.region))
+            self._calibration = calibration
+            self.calibrationChanged.emit()
+
+        if self._cameras_pending is not None:
+            self._cameras, self._cameras_pending = self._cameras_pending, None
+            self._probing = False
+            self.camerasChanged.emit()
+
+        # Pause can change with no frames arriving (hotkey while the camera is reconnecting).
+        if self._pipeline.paused != self._paused:
+            self._paused = self._pipeline.paused
+            self.pausedChanged.emit()
+            self.notify.emit("Gestura paused" if self._paused else "Gestura resumed",
+                             f"Press {self.pauseHotkeyLabel} to "
+                             + ("resume." if self._paused else "pause again."))
+
         if pending is None:
             return
         qimg, points, tele, interp = pending
@@ -166,11 +234,9 @@ class AppController(QObject):
         self._mode = tele.mode
         self._hand_present = tele.hand_present
         self._confidence = interp.features.score if interp.features else 0.0
-        if tele.paused != self._paused:
-            self._paused = tele.paused
-            self.pausedChanged.emit()
         self.telemetryChanged.emit()
-        self.frameReady.emit(qimg, points)
+        if qimg is not None:
+            self.frameReady.emit(qimg, points)
 
     # -- helpers -------------------------------------------------------------------------------
     @staticmethod
@@ -242,6 +308,65 @@ class AppController(QObject):
     def appAuthor(self) -> str:
         return __author__
 
+    @Property(bool, notify=settingsChanged)
+    def showPreview(self) -> bool:
+        return self._settings.ui.show_camera_preview
+
+    @Property(bool, notify=settingsChanged)
+    def closeToTray(self) -> bool:
+        return self._settings.ui.close_to_tray
+
+    @Property(str, notify=settingsChanged)
+    def pauseHotkey(self) -> str:
+        return self._settings.ui.pause_hotkey
+
+    @Property(str, notify=settingsChanged)
+    def pauseHotkeyLabel(self) -> str:
+        """The hotkey as people write it, e.g. ``Ctrl+Alt+G``."""
+        return "+".join(k.capitalize() if len(k) > 1 else k.upper()
+                        for k in self._settings.ui.pause_hotkey.split("+"))
+
+    @Property(str, notify=hotkeyChanged)
+    def hotkeyError(self) -> str:
+        return self._hotkey_error
+
+    @Property(bool, constant=True)
+    def autostartSupported(self) -> bool:
+        return self._autostart.supported
+
+    @Property(list, notify=camerasChanged)
+    def cameras(self) -> list[int]:
+        return list(self._cameras)
+
+    @Property(bool, notify=camerasChanged)
+    def probingCameras(self) -> bool:
+        return self._probing
+
+    @Property(int, notify=settingsChanged)
+    def cameraIndex(self) -> int:
+        return self._settings.profile().camera.device_index
+
+    @Property(list, notify=settingsChanged)
+    def activeRegion(self) -> list[float]:
+        """The part of the camera frame that maps onto the whole screen, ``[x0, y0, x1, y1]``."""
+        return list(active_region(self._settings.profile().cursor))
+
+    @Property(bool, notify=settingsChanged)
+    def calibrated(self) -> bool:
+        return self._settings.profile().cursor.region is not None
+
+    @Property(str, notify=calibrationChanged)
+    def calibrationState(self) -> str:
+        return self._calibration.state
+
+    @Property(float, notify=calibrationChanged)
+    def calibrationProgress(self) -> float:
+        return self._calibration.progress
+
+    @Property(str, notify=calibrationChanged)
+    def calibrationMessage(self) -> str:
+        return self._calibration.message
+
     @Property(list, notify=gesturesChanged)
     def gestureRows(self) -> list[dict[str, Any]]:
         """One row per gesture (built-in, then custom) with its binding and bindable actions."""
@@ -277,6 +402,74 @@ class AppController(QObject):
             return
         self._persist()
         self.themeChanged.emit()
+
+    # -- window / background --------------------------------------------------------------------
+    @Slot()
+    def requestClose(self) -> None:
+        """The window's close button: hide to the tray or quit, as the app decides."""
+        self.closeRequested.emit()
+
+    @Slot(str, result=str)
+    def setPauseHotkey(self, text: str) -> str:
+        """Change the global pause hotkey. Returns an error message, or ``""`` on success."""
+        try:
+            parse_hotkey(text)
+        except ValueError as exc:
+            return str(exc)
+        previous = self._settings.ui.pause_hotkey
+        self._settings.ui.pause_hotkey = "+".join(parse_shortcut(text))
+        if self._hotkey is not None:          # only re-register while the app is running
+            self._register_hotkey()
+            if self._hotkey_error:
+                error = self._hotkey_error
+                self._settings.ui.pause_hotkey = previous
+                self._register_hotkey()
+                return error
+        self._persist()
+        self.settingsChanged.emit()
+        return ""
+
+    # -- camera --------------------------------------------------------------------------------
+    @Slot()
+    def refreshCameras(self) -> None:
+        """Probe which cameras can be opened (in the background; it takes a moment)."""
+        if self._probing:
+            return
+        self._probing = True
+        self.camerasChanged.emit()
+        current = self._settings.profile().camera.device_index
+
+        def probe() -> None:
+            found = list_cameras()
+            # The camera in use may refuse a second open; it's obviously present.
+            if current not in found:
+                found.append(current)
+            self._cameras_pending = sorted(found)
+
+        threading.Thread(target=probe, name="gestura-camera-probe", daemon=True).start()
+
+    @Slot(int)
+    def setCamera(self, index: int) -> None:
+        if index != self._settings.profile().camera.device_index:
+            self._set("profile.camera.device_index", index)   # the pipeline reopens the camera
+
+    # -- reach calibration ---------------------------------------------------------------------
+    @Slot(result=str)
+    def startCalibration(self) -> str:
+        if self._pipeline.init_error:
+            return "Hand tracking isn't running"
+        if self._camera_status != "streaming":
+            return "The camera isn't streaming yet"
+        self._pipeline.start_calibration()
+        return ""
+
+    @Slot()
+    def cancelCalibration(self) -> None:
+        self._pipeline.cancel_calibration()
+
+    @Slot()
+    def resetCalibration(self) -> None:
+        self._set("profile.cursor.region", None)
 
     # -- gesture editor ------------------------------------------------------------------------
     @Slot(str, str, result=bool)
@@ -462,7 +655,27 @@ class AppController(QObject):
 
     @Slot(str, bool)
     def setBool(self, path: str, value: bool) -> None:
+        if path == "ui.launch_on_startup" and not self._autostart.apply(value):
+            _log.warning("Start with Windows could not be changed")
+            self.settingsChanged.emit()      # snap the toggle back to the real state
+            return
         self._set(path, value)
+
+    def sync_autostart(self) -> None:
+        """Mirror the Windows startup entry into the setting, and refresh its path.
+
+        The registry is the source of truth: the installer's "Start with Windows" option writes
+        the same entry, and the setting must never fight it (or launch Gestura twice).
+        """
+        if not self._autostart.supported:
+            return
+        enabled = self._autostart.is_enabled()
+        if enabled:
+            self._autostart.apply(True)      # update the command if the app has moved
+        if enabled != self._settings.ui.launch_on_startup:
+            self._settings.ui.launch_on_startup = enabled
+            self._persist()
+            self.settingsChanged.emit()
 
     def _set(self, path: str, value: object) -> None:
         try:

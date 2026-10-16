@@ -7,7 +7,7 @@ preserve aspect ratio. The controller pushes frames via :meth:`update_frame` on 
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Slot
+from PySide6.QtCore import Property, QPointF, QRectF, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtQml import QmlElement
 from PySide6.QtQuick import QQuickPaintedItem
@@ -30,14 +30,30 @@ _HAND_CONNECTIONS: tuple[tuple[int, int], ...] = (
 
 @QmlElement
 class CameraView(QQuickPaintedItem):
-    """Paints the most recent frame and hand skeleton. No state beyond the current frame."""
+    """Paints the most recent frame, the cursor's active area, and the hand skeleton."""
+
+    regionChanged = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._image = QImage()
         self._points: list[QPointF] = []
+        self._region: list[float] = []
         self._accent = QColor(80, 220, 220)
         self.setOpaquePainting(False)
+
+    # The part of the frame that maps onto the whole screen, [x0, y0, x1, y1] (normalized).
+    def _get_region(self) -> list[float]:
+        return self._region
+
+    def _set_region(self, region: list[float]) -> None:
+        region = [float(v) for v in region] if region and len(region) == 4 else []
+        if region != self._region:
+            self._region = region
+            self.regionChanged.emit()
+            self.update()
+
+    region = Property(list, _get_region, _set_region, notify=regionChanged)
 
     @Slot(QImage, list)
     def update_frame(self, image: QImage, points: list) -> None:
@@ -68,10 +84,23 @@ class CameraView(QQuickPaintedItem):
         target = QRectF(ox, oy, dw, dh)
         painter.fillRect(QRectF(0, 0, w, h), QColor(12, 14, 20))
         painter.drawImage(target, self._image)
+        self._draw_region(painter, ox, oy, dw, dh)
 
         if not self._points:
             return
         self._draw_skeleton(painter, ox, oy, dw, dh)
+
+    def _draw_region(self, painter: QPainter, ox: float, oy: float, dw: float, dh: float) -> None:
+        """Dashed frame showing where your knuckles must stay to reach every edge of the screen."""
+        if not self._region:
+            return
+        x0, y0, x1, y1 = self._region
+        rect = QRectF(ox + x0 * dw, oy + y0 * dh, (x1 - x0) * dw, (y1 - y0) * dh)
+        pen = QPen(QColor(255, 255, 255, 110), 1.4, Qt.PenStyle.DashLine)
+        pen.setDashPattern([5, 4])
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(rect, 6, 6)
 
     def _draw_skeleton(self, painter: QPainter, ox: float, oy: float, dw: float, dh: float) -> None:
         # Points arrive as consecutive blocks of 21, one block per tracked hand.

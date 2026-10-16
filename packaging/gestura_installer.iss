@@ -6,7 +6,7 @@
 ;   3. iscc packaging\gestura_installer.iss   (produces packaging/dist/GesturaSetup.exe)
 
 #define AppName "Gestura"
-#define AppVersion "0.1.0"
+#define AppVersion "0.2.0"
 #define AppPublisher "Krithik S"
 #define AppExeName "Gestura.exe"
 
@@ -18,6 +18,7 @@ AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 UninstallDisplayIcon={app}\{#AppExeName}
+SetupIconFile=..\assets\icons\gestura.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -42,7 +43,11 @@ Source: "..\dist\Gestura\*"; DestDir: "{app}"; Flags: recursesubdirs createallsu
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
-Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startup
+
+[Registry]
+; The same per-user startup entry the app's "Start with Windows" setting manages, so the two never
+; disagree (or launch Gestura twice). Starts quietly in the tray; removed on uninstall.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppName}"; ValueData: """{app}\{#AppExeName}"" --minimized"; Tasks: startup; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent

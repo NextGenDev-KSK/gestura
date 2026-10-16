@@ -40,6 +40,9 @@ account, no telemetry.
 | Gesture editor | Rebind, enable/disable, or unbind every gesture in-app. Only actions a gesture can actually drive are offered, so a binding can't silently do nothing |
 | Gesture trainer | Name a hand shape, press **Record**, hold it for ~1 s — Gestura learns it from 40 frames on-device, ready to bind |
 | Reliability | Stability gates, cooldowns, exclusive drag/scroll/zoom modes, clean release on tracking loss, automatic camera reconnection |
+| Background app | Runs from the **system tray** (closing the window keeps it on), **Ctrl+Alt+G** pauses/resumes from anywhere, optional **start with Windows**, single instance |
+| Reach calibration | Sweep your hand once and the cursor maps exactly your comfortable reach onto the whole screen; the preview shows that area |
+| Camera | Pick between webcams live, mirror toggle, and a preview on/off switch (gesture control keeps running) |
 | Settings | Live, searchable settings panel; typed, validated, atomically-saved config with automatic schema migration |
 
 The full gesture vocabulary and usage tips are in the [user guide](docs/USER_GUIDE.md).
@@ -60,7 +63,8 @@ Every dependency is justified in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
 ## Status
 
-**Alpha (v0.1)** — the full pipeline, every gesture above, the in-app gesture editor and trainer,
+**Alpha (v0.2)** — the full pipeline, every gesture above, the in-app gesture editor and trainer,
+system-tray operation, reach calibration,
 and the Windows integration are implemented and covered by an automated test suite that runs
 without a camera. A Linux port is an architectural goal (the OS layer is a single interface) but
 not yet implemented.
@@ -150,6 +154,7 @@ OS Adapter (Windows)     ─┘
 | [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Frame-rate and latency notes |
 | [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) | Building, testing, extending |
 | [`docs/RELEASE.md`](docs/RELEASE.md) | Release checklist |
+| [`CHANGELOG.md`](CHANGELOG.md) | What changed in each version |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute |
 
 ## License

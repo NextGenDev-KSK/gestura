@@ -73,8 +73,43 @@ Every row above is just the default — rebind any of them in the **Gestures** p
 - **Confidence meter** — detection confidence of the current hand.
 - **Gestures list** — what each active gesture currently does; **Edit ›** opens the editor.
 - **✋ Gestures** — the gesture editor and trainer (below).
-- **⚙ Settings** — searchable cursor, recognition and interface tuning, applied live.
+- **⚙ Settings** — searchable camera, cursor, recognition, startup and interface settings,
+  applied live.
 - **Theme toggle** — light / dark (🌓 in the title bar).
+- **✕** — hides the window; gesture control keeps running in the system tray (see below).
+
+## Running in the background
+
+Gestura is meant to stay out of your way:
+
+- **Closing the window doesn't stop it.** Gesture control keeps running and Gestura sits in the
+  system tray. The tray icon is coloured while control is on and grey with a pause symbol while
+  paused. Click it to bring the window back; right-click for *Pause/Resume* and *Quit Gestura*.
+  (Prefer closing to quit? Turn off *Keep running in the tray when closed* in Settings.)
+- **Ctrl+Alt+G pauses or resumes from anywhere**, even when the window is hidden. If a gesture
+  ever misbehaves, the keyboard always gets you back in control. Change the keys under
+  Settings → Background & startup (it needs Ctrl, Alt, Shift or Win plus one key).
+- **Start with Windows** (Settings → Background & startup) starts Gestura quietly in the tray when
+  you sign in. *Start minimized to the tray* does the same for every launch.
+- **Only one copy runs.** Opening Gestura again while it's running just brings its window forward.
+
+## Calibrating your reach
+
+The cursor follows the part of the camera image your hand moves in, and that part is stretched
+over the whole screen. By default it's the middle of the frame. Calibration fits it to *you*:
+
+1. Settings → Cursor → **Calibrate**.
+2. For about six seconds, slowly sweep your hand left, right, up and down over the area that feels
+   comfortable. Nothing gets clicked while you do this.
+3. Done: that area now covers the whole screen. The camera preview shows it as a dashed frame.
+
+Re-run it if you change where you sit; **Reset** goes back to the default area.
+
+## Choosing a camera
+
+Settings → Camera lists your webcams (press **Detect** after plugging one in) and switches
+between them live. *Mirror camera* and *Show camera preview* are there too. With the preview off,
+gesture control keeps running and Gestura does less work per frame.
 
 ## Changing what gestures do (the gesture editor)
 
@@ -128,8 +163,12 @@ Everything is local. Gestura makes no network connections.
   [`PERFORMANCE.md`](PERFORMANCE.md)).
 - **Camera won't start / "reconnecting".** Close other apps using the webcam (Teams, Zoom). The
   status dot goes green once it recovers.
-- **Cursor too jittery / too laggy.** Tune `cursor.smoothing_min_cutoff` (lower = steadier) and
-  `cursor.smoothing_beta` (higher = less lag) in `settings.json`.
+- **Hard to reach the screen edges, or the cursor feels too fast.** Run *Calibrate* (Settings →
+  Cursor) from where you normally sit.
+- **Cursor too jittery / too laggy.** Adjust *Smoothing* (steadier) and *Responsiveness* (less
+  lag) in Settings → Cursor.
+- **Ctrl+Alt+G doesn't work.** Another app already uses it; Settings → Background & startup shows
+  this. Pick a different combination there.
 - **Accidental clicks.** Raise `thresholds.pinch_on` slightly, or increase
   `thresholds.stability_time`.
 - **Brightness does nothing.** Many external monitors don't support software (DDC/CI) brightness.

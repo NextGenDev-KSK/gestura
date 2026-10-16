@@ -65,14 +65,39 @@ def test_landmark_points_cover_every_tracked_hand(hand_factory, multi_frame_fact
 
 
 # --- Gesture editor / trainer bridge ------------------------------------------------------------
+class FakeRunKey:
+    """In-memory stand-in for the Windows Run registry key (tests never touch the real one)."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.values: dict[str, str] = {}
+        self.fail = fail
+
+    def get(self, name):
+        return self.values.get(name)
+
+    def set(self, name, command):
+        if self.fail:
+            raise PermissionError("denied")
+        self.values[name] = command
+
+    def delete(self, name):
+        self.values.pop(name, None)
+
+
 @pytest.fixture
-def editor(tmp_path, monkeypatch):
-    """A dry-run controller with throwaway settings and custom-gesture storage."""
+def run_key():
+    return FakeRunKey()
+
+
+@pytest.fixture
+def editor(tmp_path, monkeypatch, run_key):
+    """A dry-run controller with throwaway settings, custom-gesture storage and registry."""
     from gestura.config.store import SettingsStore
+    from gestura.platform.autostart import AutoStart
 
     monkeypatch.setattr("gestura.engine.pipeline.data_dir", lambda: tmp_path)
     store = SettingsStore(path=tmp_path / "settings.json")
-    ctrl = AppController(store.load(), store, dry_run=True)
+    ctrl = AppController(store.load(), store, dry_run=True, autostart=AutoStart(run_key))
     yield ctrl, store
     ctrl.stop()
 
@@ -218,3 +243,108 @@ def test_about_footer_credits_the_developer(editor) -> None:
     ctrl, _ = editor
     assert ctrl.appAuthor == "Krithik S"
     assert ctrl.appVersion == gestura.__version__
+
+
+# --- Background app: hotkey, startup, camera, preview, calibration -------------------------------
+def test_pause_hotkey_is_validated_and_saved(editor) -> None:
+    from gestura.config.store import SettingsStore
+
+    ctrl, store = editor
+    assert ctrl.pauseHotkeyLabel == "Ctrl+Alt+G"
+    assert "Ctrl" in ctrl.setPauseHotkey("g")              # needs a modifier
+    assert ctrl.setPauseHotkey("Ctrl + Shift + P") == ""
+    assert ctrl.pauseHotkey == "ctrl+shift+p"
+    assert ctrl.pauseHotkeyLabel == "Ctrl+Shift+P"
+    assert SettingsStore(path=store.path).load().ui.pause_hotkey == "ctrl+shift+p"
+
+
+def test_start_with_windows_writes_the_run_entry(editor, run_key) -> None:
+    ctrl, _ = editor
+    ctrl.setBool("ui.launch_on_startup", True)
+    assert ctrl.getSetting("ui.launch_on_startup") is True
+    assert "--minimized" in run_key.values["Gestura"]
+    ctrl.setBool("ui.launch_on_startup", False)
+    assert "Gestura" not in run_key.values
+
+
+def test_start_with_windows_failure_leaves_the_setting_off(tmp_path) -> None:
+    from gestura.config.store import SettingsStore
+    from gestura.platform.autostart import AutoStart
+
+    store = SettingsStore(path=tmp_path / "s.json")
+    ctrl = AppController(store.load(), store, dry_run=True,
+                         autostart=AutoStart(FakeRunKey(fail=True)))
+    ctrl.setBool("ui.launch_on_startup", True)
+    assert ctrl.getSetting("ui.launch_on_startup") is False
+
+
+def test_registry_entry_from_the_installer_is_adopted(editor, run_key) -> None:
+    ctrl, _ = editor
+    run_key.values["Gestura"] = '"C:\\old\\Gestura.exe" --minimized'
+    ctrl.sync_autostart()
+    assert ctrl.getSetting("ui.launch_on_startup") is True
+    assert run_key.values["Gestura"].endswith("--minimized")   # command refreshed to this install
+
+
+def test_calibration_result_is_applied_and_resettable(editor) -> None:
+    from gestura.engine.pipeline import CalibrationStatus
+
+    ctrl, _ = editor
+    assert not ctrl.calibrated
+    assert ctrl.startCalibration() == "The camera isn't streaming yet"
+    ctrl._pipeline._calibration_status = CalibrationStatus(
+        "done", 1.0, 80, (0.2, 0.25, 0.7, 0.75), "Calibrated to your reach")
+    ctrl._tick()
+    assert ctrl.calibrated
+    assert ctrl.activeRegion == pytest.approx([0.2, 0.25, 0.7, 0.75])
+    assert ctrl.calibrationState == "done"
+    ctrl.resetCalibration()
+    assert not ctrl.calibrated
+
+
+def test_switching_camera_updates_the_setting(editor) -> None:
+    ctrl, _ = editor
+    ctrl.setCamera(1)
+    assert ctrl.cameraIndex == 1
+    assert ctrl._settings.profile().camera.device_index == 1
+
+
+def test_hidden_preview_skips_frame_conversion(editor, hand_factory, frame_factory) -> None:
+    from gestura.engine.interpreter import InterpretationResult
+    from gestura.engine.pipeline import PipelineTelemetry
+
+    ctrl, _ = editor
+    frames = []
+    ctrl.frameReady.connect(lambda img, pts: frames.append(img))
+    tele = PipelineTelemetry(30, 5, True, "open_palm", "IDLE", False, "streaming")
+    img = np.zeros((48, 64, 3), dtype=np.uint8)
+    fr = frame_factory(hand_factory("open"), timestamp=0.0)
+
+    ctrl._on_update(img, fr, InterpretationResult(), tele)
+    ctrl._tick()
+    assert len(frames) == 1
+    ctrl.setBool("ui.show_camera_preview", False)
+    ctrl._on_update(img, fr, InterpretationResult(), tele)
+    ctrl._tick()
+    assert len(frames) == 1            # nothing converted or drawn
+    assert ctrl.handPresent            # but telemetry still flows
+
+
+def test_pause_from_the_hotkey_reaches_the_ui_without_frames(editor) -> None:
+    ctrl, _ = editor
+    notes = []
+    ctrl.notify.connect(lambda title, body: notes.append(title))
+    ctrl._on_hotkey()                  # what the global hotkey thread calls
+    ctrl._tick()
+    assert ctrl.paused and notes == ["Gestura paused"]
+    ctrl._on_hotkey()
+    ctrl._tick()
+    assert not ctrl.paused and notes[-1] == "Gestura resumed"
+
+
+def test_close_button_asks_the_app(editor) -> None:
+    ctrl, _ = editor
+    asked = []
+    ctrl.closeRequested.connect(lambda: asked.append(True))
+    ctrl.requestClose()
+    assert asked == [True]

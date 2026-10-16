@@ -11,7 +11,7 @@ ApplicationWindow {
     height: 720
     minimumWidth: 900
     minimumHeight: 600
-    visible: true
+    visible: false          // shown by the app, unless it starts minimized to the tray
     color: "transparent"
     flags: Qt.Window | Qt.FramelessWindowHint
     title: "Gestura"
@@ -22,6 +22,9 @@ ApplicationWindow {
         function onThemeChanged() { Theme.dark = (controller.theme !== "light") }
         function onFrameReady(image, points) { cameraView.update_frame(image, points) }
         function onGestureFired(name) { toast.show(name) }
+        function onCalibrationChanged() {
+            if (controller.calibrationState === "done") toast.show("Calibrated to your reach")
+        }
     }
 
     // ---- Background ----------------------------------------------------------------------
@@ -93,7 +96,9 @@ ApplicationWindow {
                 WinButton { glyph: "⚙"; tip: "Settings"; onClicked: settingsPanel.open = true }
                 WinButton { glyph: "🌓"; onClicked: controller.setTheme(Theme.dark ? "light" : "dark") }
                 WinButton { glyph: "—"; onClicked: win.showMinimized() }
-                WinButton { glyph: "✕"; danger: true; onClicked: Qt.quit() }
+                WinButton { glyph: "✕"; danger: true
+                            tip: controller.closeToTray ? "Close (keeps running in the tray)" : "Quit"
+                            onClicked: controller.requestClose() }
             }
         }
 
@@ -131,6 +136,84 @@ ApplicationWindow {
                     id: cameraView
                     anchors.fill: parent
                     anchors.margins: 1
+                    visible: controller.showPreview
+                    region: controller.activeRegion
+                }
+
+                // Preview turned off in Settings (privacy, or to save CPU).
+                Column {
+                    anchors.centerIn: parent
+                    visible: !controller.showPreview
+                    spacing: 10
+                    Text { text: "◌"; color: Theme.subtext; font.pixelSize: 40
+                           anchors.horizontalCenter: parent.horizontalCenter }
+                    Text { text: "Camera preview is off"; color: Theme.text
+                           font.pixelSize: Theme.fontL; font.weight: Font.DemiBold
+                           anchors.horizontalCenter: parent.horizontalCenter }
+                    Text { text: "Gesture control is still running."; color: Theme.subtext
+                           font.pixelSize: Theme.fontM
+                           anchors.horizontalCenter: parent.horizontalCenter }
+                    PillButton { text: "Show preview"
+                                 anchors.horizontalCenter: parent.horizontalCenter
+                                 onClicked: controller.setBool("ui.show_camera_preview", true) }
+                }
+
+                // Reach calibration in progress: instructions + progress over the preview.
+                Rectangle {
+                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 16
+                    anchors.topMargin: 58
+                    visible: controller.calibrationState === "running"
+                             || controller.calibrationState === "failed"
+                    height: calCol.implicitHeight + 28
+                    radius: 14
+                    color: Qt.rgba(0, 0, 0, 0.62)
+                    Column {
+                        id: calCol
+                        anchors.left: parent.left; anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.margins: 16
+                        spacing: 10
+                        Text {
+                            width: parent.width; wrapMode: Text.WordWrap
+                            color: "white"; font.pixelSize: Theme.fontM; font.weight: Font.DemiBold
+                            text: controller.calibrationState === "failed"
+                                  ? "Calibration didn't work" : "Calibrating your reach"
+                        }
+                        Text {
+                            width: parent.width; wrapMode: Text.WordWrap
+                            color: controller.calibrationState === "failed" ? "#ffb4b4" : "#d6dbe6"
+                            font.pixelSize: Theme.fontS
+                            text: controller.calibrationState === "failed"
+                                  ? controller.calibrationMessage
+                                  : "Sweep your hand slowly to the left, right, top and bottom of "
+                                    + "the area that feels comfortable. Nothing will be clicked."
+                        }
+                        Rectangle {
+                            visible: controller.calibrationState === "running"
+                            width: parent.width; height: 6; radius: 3
+                            color: Qt.rgba(1, 1, 1, 0.15)
+                            Rectangle {
+                                height: parent.height; radius: 3
+                                width: parent.width * controller.calibrationProgress
+                                color: Theme.accent
+                                Behavior on width { NumberAnimation { duration: 90 } }
+                            }
+                        }
+                        Row {
+                            spacing: 8
+                            PillButton { height: 32; text: "Cancel"
+                                         visible: controller.calibrationState === "running"
+                                         onClicked: controller.cancelCalibration() }
+                            PillButton { height: 32; text: "Try again"; accentFill: true
+                                         visible: controller.calibrationState === "failed"
+                                         onClicked: controller.startCalibration() }
+                            PillButton { height: 32; text: "Close"
+                                         visible: controller.calibrationState === "failed"
+                                         onClicked: controller.cancelCalibration() }
+                        }
+                    }
                 }
 
                 // Camera status chip
@@ -179,9 +262,29 @@ ApplicationWindow {
                     Text {
                         id: poseText
                         anchors.centerIn: parent
-                        text: controller.paused ? "PAUSED" : controller.pose.replace(/_/g, " ")
+                        text: controller.paused ? "Paused · " + controller.pauseHotkeyLabel + " to resume"
+                                                : controller.pose.replace(/_/g, " ")
                         color: "#06121a"; font.pixelSize: Theme.fontM; font.weight: Font.DemiBold
-                        font.capitalization: Font.Capitalize
+                        font.capitalization: controller.paused ? Font.MixedCase : Font.Capitalize
+                    }
+                }
+
+                // First-use hint: the camera works but no hand has been seen yet.
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottomMargin: 16
+                    visible: controller.cameraStatus === "streaming" && !controller.handPresent
+                             && !controller.paused && controller.calibrationState !== "running"
+                    radius: height / 2
+                    height: 34
+                    width: hintText.implicitWidth + 30
+                    color: Qt.rgba(0, 0, 0, 0.55)
+                    Text {
+                        id: hintText
+                        anchors.centerIn: parent
+                        text: "✋  Raise your hand in front of the camera"
+                        color: "white"; font.pixelSize: Theme.fontM
                     }
                 }
             }
