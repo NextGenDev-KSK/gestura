@@ -4,14 +4,26 @@
 
 **Control your computer with your hands — fully offline, privacy-first.**
 
+[![CI](https://github.com/NextGenDev-KSK/gestura/actions/workflows/ci.yml/badge.svg)](https://github.com/NextGenDev-KSK/gestura/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%E2%80%933.12-3776ab.svg)
+![Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4.svg)
+
 Gestura turns any webcam into a low-latency gesture controller: move the cursor, click,
 drag, scroll, zoom, adjust volume and brightness, control media, switch windows, fire keyboard
 shortcuts, and teach it your own gestures — all processed locally on your machine. No cloud, no
 account, no telemetry.
 
-*(Working title — the package name `gestura` is trivial to rename; see `docs/DEVELOPER_GUIDE.md`.)*
-
 </div>
+
+![Gestura's main window](docs/images/main.png)
+
+<sub>Main window. The camera area here shows a sample hand pose on a plain background, not a real
+camera feed.</sub>
+
+| Gesture editor | Settings |
+|:---:|:---:|
+| ![Rebind any gesture to a compatible action](docs/images/gestures.png) | ![Camera, cursor, calibration and startup settings](docs/images/settings.png) |
 
 ---
 
@@ -159,4 +171,4 @@ OS Adapter (Windows)     ─┘
 
 ## License
 
-Apache License 2.0 — see [`LICENSE`](LICENSE).
+Apache License 2.0 — see [`LICENSE`](LICENSE). Copyright © 2026 Krithik S.
