@@ -105,3 +105,85 @@ def test_windows_zoom_sends_ctrl_wheel_in_one_batch(monkeypatch) -> None:
 
     adapter.zoom(0.001)  # below one wheel step: nothing is sent
     assert len(batches) == 1
+
+
+# --- Global pause hotkey -----------------------------------------------------------------------
+def test_parse_hotkey_requires_a_modifier_and_one_key() -> None:
+    from gestura.platform.hotkey import parse_hotkey
+
+    assert parse_hotkey("Ctrl+Alt+G") == (0x2 | 0x1, "g")
+    assert parse_hotkey("win+shift+f9") == (0x8 | 0x4, "f9")
+    for bad in ("g", "ctrl+alt", "ctrl+a+b", "ctrl+banana"):
+        with pytest.raises(ValueError):
+            parse_hotkey(bad)
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows RegisterHotKey")
+def test_global_hotkey_fires_and_unregisters() -> None:
+    import ctypes
+    import threading
+
+    from gestura.platform.hotkey import _WM_HOTKEY, GlobalHotkey
+
+    fired = threading.Event()
+    hk = GlobalHotkey("ctrl+alt+shift+f11", fired.set)
+    assert hk.start(), hk.error
+    try:
+        # Simulate the key press: deliver WM_HOTKEY to the hotkey thread's message queue.
+        ctypes.windll.user32.PostThreadMessageW(hk._thread_id, _WM_HOTKEY, GlobalHotkey._ID, 0)
+        assert fired.wait(2.0)
+    finally:
+        hk.stop()
+    assert hk._thread is None
+    # Once released, the same chord can be registered again.
+    again = GlobalHotkey("ctrl+alt+shift+f11", lambda: None)
+    assert again.start(), again.error
+    again.stop()
+
+
+def test_global_hotkey_reports_a_bad_chord() -> None:
+    from gestura.platform.hotkey import GlobalHotkey
+
+    hk = GlobalHotkey("g", lambda: None)
+    assert not hk.start()
+    assert "Ctrl" in hk.error
+
+
+# --- Start with Windows --------------------------------------------------------------------------
+class _FakeRunKey:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def get(self, name):
+        return self.values.get(name)
+
+    def set(self, name, command):
+        self.values[name] = command
+
+    def delete(self, name):
+        self.values.pop(name, None)
+
+
+def test_autostart_writes_and_removes_the_run_entry() -> None:
+    from gestura.platform.autostart import VALUE_NAME, AutoStart
+
+    key = _FakeRunKey()
+    auto = AutoStart(key)
+    assert auto.supported and not auto.is_enabled()
+    assert auto.apply(True)
+    assert auto.is_enabled()
+    assert key.values[VALUE_NAME].endswith("--minimized")
+    assert "gestura" in key.values[VALUE_NAME].lower()
+    assert auto.apply(False)
+    assert not auto.is_enabled()
+
+
+def test_autostart_reports_registry_failures() -> None:
+    from gestura.platform.autostart import AutoStart
+
+    class Broken(_FakeRunKey):
+        def set(self, name, command):
+            raise PermissionError("denied")
+
+    assert not AutoStart(Broken()).apply(True)
