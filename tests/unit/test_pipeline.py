@@ -221,3 +221,68 @@ def test_while_recording_actions_are_suppressed_but_drags_still_release(
         pipe.stop()
     assert "click" not in adapter.names()                     # the pinch did not click
     assert adapter.names().count("move_cursor") == moves_before  # and the cursor stayed put
+
+
+# --- Reach calibration & live restarts -----------------------------------------------------------
+def test_calibration_fits_a_region_from_the_sweep(tmp_path, hand_factory, frame_factory,
+                                                  shift) -> None:
+    pipe = _trainer_pipeline(tmp_path)
+    pipe.start_calibration(duration=1.0)
+    t0 = pipe._calibration.started
+    base = hand_factory("open")
+    for i in range(60):                       # sweep: a grid of hand positions
+        dx, dy = (i % 6) * 0.04 - 0.1, (i // 6 % 5) * 0.04 - 0.08
+        assert pipe._feed_calibration(frame_factory(shift(base, dx, dy), timestamp=0.0),
+                                      now=t0 + i * 0.015)
+    assert pipe.calibration_status.active
+    assert 0.8 < pipe.calibration_status.progress < 1.0
+    pipe._feed_calibration(frame_factory(base, timestamp=0.0), now=t0 + 1.0)
+    status = pipe.calibration_status
+    assert status.state == "done" and status.samples == 61
+    x0, y0, x1, y1 = status.region
+    assert 0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1
+    assert not pipe._feed_calibration(frame_factory(base, timestamp=0.0), now=t0 + 2)  # finished
+
+
+def test_calibration_without_a_hand_fails_cleanly(tmp_path, frame_factory) -> None:
+    pipe = _trainer_pipeline(tmp_path)
+    pipe.start_calibration(duration=0.5)
+    t0 = pipe._calibration.started
+    pipe._feed_calibration(frame_factory(None, timestamp=0.0), now=t0 + 0.6)
+    status = pipe.calibration_status
+    assert status.state == "failed" and status.region is None and status.message
+    pipe.start_calibration(duration=5)
+    pipe.cancel_calibration()
+    assert pipe.calibration_status.state == "cancelled"
+
+
+class _CountingCamera(_FakeCamera):
+    def __init__(self, frames) -> None:
+        super().__init__(frames)
+        self.starts = 0
+
+    def start(self) -> None:
+        self.starts += 1
+
+
+def test_camera_settings_reopen_the_camera_but_tuning_does_not(tmp_path, hand_factory,
+                                                              frame_factory) -> None:
+    script = {1: frame_factory(hand_factory("open"), timestamp=0.0, index=1)}
+    camera = _CountingCamera([CameraFrame(np.zeros((4, 4, 3), np.uint8), index=1, timestamp=0.0)])
+    settings = AppSettings()
+    pipe = GesturePipeline(settings, RecordingAdapter(), camera=camera,
+                           tracker_factory=lambda: _FakeTracker(script),
+                           custom_store=tmp_path / "c.json")
+    pipe.start()
+    try:
+        assert camera.starts == 1
+        settings.profile().cursor.smoothing_beta = 0.2       # tuning: applied in place
+        pipe.apply_settings(settings)
+        time.sleep(0.3)
+        assert camera.starts == 1
+        settings.profile().camera.mirror = not settings.profile().camera.mirror
+        pipe.apply_settings(settings)                       # hardware: reopen in the background
+        assert _wait_for(lambda: camera.starts == 2)
+        assert _wait_for(lambda: pipe.running)
+    finally:
+        pipe.stop()

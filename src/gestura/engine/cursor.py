@@ -21,6 +21,19 @@ from ..core.filters import OneEuroFilter2D
 from ..core.geometry import clamp, remap
 
 
+def active_region(config: CursorConfig) -> tuple[float, float, float, float]:
+    """The frame rectangle ``(x0, y0, x1, y1)`` that maps onto the whole screen.
+
+    The calibrated region wins when there is one; otherwise it is the frame minus the configured
+    margins on every side.
+    """
+    if config.region is not None:
+        x0, y0, x1, y1 = config.region
+        return x0, y0, x1, y1
+    mx, my = config.region_margin_x, config.region_margin_y
+    return mx, my, 1.0 - mx, 1.0 - my
+
+
 class CursorController:
     """Stateful mapper from hand anchor -> smoothed normalized screen position."""
 
@@ -42,10 +55,9 @@ class CursorController:
         if not self._cfg.enabled:
             return None
 
-        mx = self._cfg.region_margin_x
-        my = self._cfg.region_margin_y
-        x = remap(anchor[0], mx, 1.0 - mx, 0.0, 1.0)
-        y = remap(anchor[1], my, 1.0 - my, 0.0, 1.0)
+        x0, y0, x1, y1 = active_region(self._cfg)
+        x = remap(anchor[0], x0, x1, 0.0, 1.0)
+        y = remap(anchor[1], y0, y1, 0.0, 1.0)
 
         # Dead zone: if the hand barely moved, hold the previous raw target so the cursor rests.
         if self._last_raw is not None:

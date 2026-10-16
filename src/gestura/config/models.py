@@ -10,11 +10,15 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 #: Bumped whenever the on-disk schema changes in a way that needs migration.
 #: v2: two-hand tracking by default, new default gesture vocabulary (see config/store.py).
 SCHEMA_VERSION = 2
+
+#: Smallest calibrated cursor region (fraction of the frame per axis). Anything tighter would
+#: make the cursor twitchy: a few centimetres of hand travel would cross the whole screen.
+MIN_REGION_SPAN = 0.15
 
 
 class _Model(BaseModel):
@@ -66,6 +70,22 @@ class CursorConfig(_Model):
     region_margin_y: float = Field(0.14, ge=0.0, le=0.4)
     # Movements smaller than this (in normalized frame units) are ignored to kill micro-jitter.
     dead_zone: float = Field(0.004, ge=0.0, le=0.1)
+    # Set by the reach calibration: the part of the frame your hand comfortably covers,
+    # ``[x0, y0, x1, y1]`` in normalized frame coordinates. When present it replaces the
+    # symmetric margins above, so an off-centre or small reach still spans the whole screen.
+    region: list[float] | None = Field(None, description="Calibrated active area [x0, y0, x1, y1]")
+
+    @field_validator("region")
+    @classmethod
+    def _valid_region(cls, v: list[float] | None) -> list[float] | None:
+        if v is None:
+            return v
+        if len(v) != 4 or not all(0.0 <= c <= 1.0 for c in v):
+            raise ValueError("region must be four values in [0, 1]")
+        x0, y0, x1, y1 = v
+        if x1 - x0 < MIN_REGION_SPAN or y1 - y0 < MIN_REGION_SPAN:
+            raise ValueError(f"region must span at least {MIN_REGION_SPAN} of the frame each way")
+        return v
 
 
 class GestureThresholds(_Model):
@@ -126,6 +146,10 @@ class UiConfig(_Model):
     show_camera_preview: bool = True
     launch_on_startup: bool = False
     start_minimized: bool = False
+    # Closing the window keeps gesture control running from the system tray.
+    close_to_tray: bool = True
+    # System-wide key chord that pauses/resumes gesture control from anywhere.
+    pause_hotkey: str = "ctrl+alt+g"
 
 
 class AppSettings(_Model):

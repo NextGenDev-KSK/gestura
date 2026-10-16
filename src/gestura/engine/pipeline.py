@@ -22,6 +22,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -34,7 +35,9 @@ from ..util.logging import get_logger
 from ..util.paths import data_dir
 from ..vision.camera import CameraSource, CameraStatus
 from ..vision.hand_tracker import HandTracker, ModelNotFoundError
+from .calibration import CalibrationError, region_from_anchors
 from .custom import CustomGestureClassifier, landmark_feature
+from .features import extract
 from .interpreter import GestureInterpreter, InterpretationResult
 
 _log = get_logger("gestura.pipeline")
@@ -72,6 +75,33 @@ class RecordingStatus:
     @property
     def active(self) -> bool:
         return self.state == "recording"
+
+
+@dataclass(frozen=True)
+class CalibrationStatus:
+    """Progress of a reach calibration, for the UI.
+
+    ``state`` is one of ``idle``, ``running``, ``done``, ``failed`` or ``cancelled``;
+    ``region`` holds the fitted ``[x0, y0, x1, y1]`` once ``done``.
+    """
+
+    state: str = "idle"
+    progress: float = 0.0
+    samples: int = 0
+    region: tuple[float, float, float, float] | None = None
+    message: str = ""
+
+    @property
+    def active(self) -> bool:
+        return self.state == "running"
+
+
+@dataclass
+class _Calibration:
+    started: float
+    duration: float
+    xs: list[float] = field(default_factory=list)
+    ys: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -120,14 +150,16 @@ class GesturePipeline:
         self._engine_lock = threading.Lock()
         self._recording: _Recording | None = None
         self._recording_status = RecordingStatus()
+        self._calibration: _Calibration | None = None
+        self._calibration_status = CalibrationStatus()
         self._dispatcher = ActionDispatcher(
             adapter, self._profile, paused=settings.paused
         )
-        cam = self._profile.camera
-        self._camera = camera or CameraSource(
-            cam.device_index, width=cam.width, height=cam.height, fps=cam.target_fps,
-            mirror=cam.mirror, on_status=self._on_camera_status,
-        )
+        # start/stop/restart can be called from the GUI thread and from a background restart.
+        self._lifecycle_lock = threading.RLock()
+        self._camera_injected = camera is not None
+        self._camera = camera or self._make_camera()
+        self._hardware = _hardware_config(self._settings)
 
         self._tracker: HandTracker | None = None
         self._thread: threading.Thread | None = None
@@ -141,24 +173,49 @@ class GesturePipeline:
     # -- lifecycle -----------------------------------------------------------------------------
     def start(self) -> None:
         """Open the camera and start the processing thread (idempotent)."""
-        if self._thread and self._thread.is_alive():
-            return
-        self._stop.clear()
-        self._init_error = None
-        self._camera.start()
-        self._thread = threading.Thread(target=self._run, name="gestura-engine", daemon=True)
-        self._thread.start()
+        with self._lifecycle_lock:
+            if self._thread and self._thread.is_alive():
+                return
+            self._stop.clear()
+            self._init_error = None
+            self._camera.start()
+            self._thread = threading.Thread(target=self._run, name="gestura-engine", daemon=True)
+            self._thread.start()
 
     def stop(self) -> None:
         """Stop processing and release the camera/tracker."""
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=3.0)
-            self._thread = None
-        self._camera.stop()
-        if self._tracker is not None:
-            self._tracker.close()
-            self._tracker = None
+        with self._lifecycle_lock:
+            self._stop.set()
+            if self._thread:
+                self._thread.join(timeout=3.0)
+                self._thread = None
+            self._camera.stop()
+            if self._tracker is not None:
+                self._tracker.close()
+                self._tracker = None
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def restart(self) -> None:
+        """Reopen the camera and tracker with the current settings (camera index, mirroring,
+        resolution, number of hands). Gesture state, custom gestures and pause carry over."""
+        with self._lifecycle_lock:
+            was_running = self.running
+            self.stop()
+            if not self._camera_injected:
+                self._camera = self._make_camera()
+            if was_running:
+                _log.info("Restarting the pipeline with new camera/tracking settings")
+                self.start()
+
+    def _make_camera(self) -> CameraSource:
+        cam = self._profile.camera
+        return CameraSource(
+            cam.device_index, width=cam.width, height=cam.height, fps=cam.target_fps,
+            mirror=cam.mirror, on_status=self._on_camera_status,
+        )
 
     # -- controls ------------------------------------------------------------------------------
     @property
@@ -266,12 +323,68 @@ class GesturePipeline:
                 "recording", rec.name, collected, rec.target, "Hold the pose steady in view…")
         return True
 
+    # -- reach calibration ---------------------------------------------------------------------
+    @property
+    def calibration_status(self) -> CalibrationStatus:
+        return self._calibration_status
+
+    def start_calibration(self, duration: float = 6.0) -> None:
+        """Collect the cursor anchor for ``duration`` seconds while the user sweeps their hand
+        over their comfortable reach; poll :attr:`calibration_status` for the fitted region.
+        No gesture actions fire meanwhile (held ones still release)."""
+        with self._engine_lock:
+            self._calibration = _Calibration(started=time.perf_counter(), duration=duration)
+            self._calibration_status = CalibrationStatus(
+                "running", message="Move your hand around the area that feels comfortable")
+
+    def cancel_calibration(self) -> None:
+        with self._engine_lock:
+            if self._calibration is not None:
+                self._calibration = None
+                self._calibration_status = CalibrationStatus("cancelled", message="Cancelled")
+
+    def _feed_calibration(self, frame: FrameResult, now: float) -> bool:
+        """Add one frame to an active calibration. Caller must hold ``_engine_lock``.
+
+        Returns ``True`` if a calibration consumed this frame (so actions are suppressed).
+        """
+        cal = self._calibration
+        if cal is None:
+            return False
+        hand = frame.primary
+        if hand is not None and hand.score >= _RECORD_MIN_CONFIDENCE:
+            ax, ay = extract(hand).anchor
+            cal.xs.append(ax)
+            cal.ys.append(ay)
+        progress = min(1.0, (now - cal.started) / cal.duration)
+        if progress < 1.0:
+            self._calibration_status = CalibrationStatus(
+                "running", progress, len(cal.xs),
+                message="Move your hand around the area that feels comfortable")
+            return True
+        self._calibration = None
+        try:
+            x0, y0, x1, y1 = region_from_anchors(cal.xs, cal.ys)
+        except CalibrationError as exc:
+            self._calibration_status = CalibrationStatus(
+                "failed", 1.0, len(cal.xs), message=str(exc))
+        else:
+            _log.info("Calibrated reach to %s from %d samples", (x0, y0, x1, y1), len(cal.xs))
+            self._calibration_status = CalibrationStatus(
+                "done", 1.0, len(cal.xs), (x0, y0, x1, y1), "Calibrated to your reach")
+        return True
+
     def apply_settings(self, settings: AppSettings) -> None:
-        """Hot-reload profile settings (thresholds, cursor tuning, bindings)."""
+        """Hot-reload settings. Tuning and bindings apply instantly; a change to the camera or
+        tracking settings reopens the camera and tracker in the background."""
         self._settings = settings
         self._profile = settings.profile()
         self._interpreter.apply_profile(self._profile)
         self._dispatcher.set_profile(self._profile)
+        hardware = _hardware_config(settings)
+        if hardware != self._hardware:
+            self._hardware = hardware
+            threading.Thread(target=self.restart, name="gestura-restart", daemon=True).start()
 
     # -- worker --------------------------------------------------------------------------------
     def _run(self) -> None:
@@ -318,11 +431,14 @@ class GesturePipeline:
             inference_ms = (time.perf_counter() - t0) * 1000.0
 
             with self._engine_lock:
-                recording = self._feed_recording(result, time.perf_counter())
+                now = time.perf_counter()
+                recording = self._feed_recording(result, now)
+                calibrating = self._feed_calibration(result, now)
                 interpretation = self._interpreter.update(result)
+            if recording or calibrating:
+                interpretation = _releases_only(interpretation)
             try:
-                self._dispatcher.dispatch(
-                    _releases_only(interpretation) if recording else interpretation)
+                self._dispatcher.dispatch(interpretation)
             except Exception:
                 _log.exception("Dispatch failed")
 
@@ -347,6 +463,12 @@ class GesturePipeline:
         self._camera_status = status
         if self._external_status_cb is not None:
             self._external_status_cb(status)
+
+
+def _hardware_config(settings: AppSettings) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The settings that need the camera/tracker reopened to take effect."""
+    profile = settings.profile()
+    return profile.camera.model_dump(), profile.tracking.model_dump()
 
 
 def _releases_only(interp: InterpretationResult) -> InterpretationResult:
